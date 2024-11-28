@@ -12,9 +12,9 @@ import {messages} from '../../support/constants';
 import {getGithubBotDMPageURL, waitForNewMessages} from '../../support/utils';
 import {getBotTagFromPost, getPostAuthor} from '../../support/components/post';
 
-const repoRegex = /https:\/\/src.pyn.ru\/[\w-]+\/[\w-]+/;
-const prRegex = /https:\/\/src.pyn.ru\/[\w-]+\/[\w-]+\/pull\/\d+/;
-const issueRegex = /https:\/\/src.pyn.ru\/[\w-]+\/[\w-]+\/issues\/\d+/;
+const repoRegex = /https:\/\/forgejo.pyn.ru\/[\w-]+\/[\w-]+/;
+const prRegex = /https:\/\/forgejo.pyn.ru\/[\w-]+\/[\w-]+\/pull\/\d+/;
+const issueRegex = /https:\/\/forgejo.pyn.ru\/[\w-]+\/[\w-]+\/issues\/\d+/;
 
 export default {
     connected: () => {

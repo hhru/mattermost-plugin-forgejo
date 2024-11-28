@@ -21,7 +21,7 @@ export default class UserAttribute extends React.PureComponent {
 
     render() {
         const username = this.props.username;
-        let baseURL = 'https://src.pyn.ru';
+        let baseURL = 'https://forgejo.pyn.ru';
         if (this.props.baseURL) {
             baseURL = this.props.baseURL;
         }

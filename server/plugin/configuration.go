@@ -85,7 +85,7 @@ func (c *Configuration) getBaseURL() string {
 		return c.BaseURL + "/"
 	}
 
-	return "https://src.pyn.ru/"
+	return "https://forgejo.pyn.ru/"
 }
 
 func (c *Configuration) sanitize() {

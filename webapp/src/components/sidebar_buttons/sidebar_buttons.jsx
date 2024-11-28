@@ -123,7 +123,7 @@ export default class SidebarButtons extends React.PureComponent {
         const yourAssignments = this.props.yourAssignments || [];
         const refreshClass = this.state.refreshing ? ' fa-spin' : '';
 
-        let baseURL = 'https://src.pyn.ru';
+        let baseURL = 'https://forgejo.pyn.ru';
         if (this.props.baseURL) {
             baseURL = this.props.baseURL;
         }

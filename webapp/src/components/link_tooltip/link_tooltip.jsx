@@ -13,8 +13,8 @@ export const LinkTooltip = ({href, connected, show, theme}) => {
     const [data, setData] = useState(null);
     useEffect(() => {
         const initData = async () => {
-            if (href.includes('src.pyn.ru/')) {
-                const [owner, repo, type, number] = href.split('src.pyn.ru/')[1].split('/');
+            if (href.includes('forgejo.pyn.ru/')) {
+                const [owner, repo, type, number] = href.split('forgejo.pyn.ru/')[1].split('/');
                 if (!owner | !repo | !type | !number) {
                     return;
                 }
