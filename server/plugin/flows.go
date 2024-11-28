@@ -67,7 +67,7 @@ func (p *Plugin) NewFlowManager() (*FlowManager, error) {
 		fm.stepDelegateConfirmation(),
 		fm.stepDelegateComplete(),
 
-		fm.stepEnterprise(),
+		fm.stepBase(),
 		fm.stepOAuthInfo(),
 		fm.stepOAuthInput(),
 		fm.stepOAuthConnect(),
@@ -90,7 +90,7 @@ func (p *Plugin) NewFlowManager() (*FlowManager, error) {
 		return nil, err
 	}
 	oauthFlow.WithSteps(
-		fm.stepEnterprise(),
+		fm.stepBase(),
 		fm.stepOAuthInfo(),
 		fm.stepOAuthInput(),
 		fm.stepOAuthConnect().Terminal(),
@@ -106,7 +106,7 @@ func (p *Plugin) NewFlowManager() (*FlowManager, error) {
 	webhookFlow.WithSteps(
 		fm.stepWebhookQuestion(),
 		flow.NewStep(stepWebhookConfirmation).
-			WithText("Use `/github subscriptions add` to subscribe any Mattermost channel to your GitHub repository. [Learn more](https://github.com/mattermost/mattermost-plugin-github#slash-commands)").
+			WithText("Use `/forgejo subscriptions add` to subscribe any Mattermost channel to your Forgejo repository. [Learn more](https://github.com/mattermost/mattermost-plugin-github#slash-commands)").
 			Terminal(),
 
 		fm.stepCancel("setup webhook"),
@@ -130,7 +130,7 @@ func (p *Plugin) NewFlowManager() (*FlowManager, error) {
 
 func (fm *FlowManager) doneStep() flow.Step {
 	return flow.NewStep(stepDone).
-		WithText(":tada: You successfully installed GitHub.").
+		WithText(":tada: You successfully installed Forgejo.").
 		OnRender(fm.onDone).Terminal()
 }
 
@@ -169,7 +169,7 @@ const (
 
 	// OAuth steps
 
-	stepEnterprise   flow.Name = "enterprise"
+	stepBase         flow.Name = "base"
 	stepOAuthInfo    flow.Name = "oauth-info"
 	stepOAuthInput   flow.Name = "oauth-input"
 	stepOAuthConnect flow.Name = "oauth-connect"
@@ -191,11 +191,10 @@ const (
 	stepDone    flow.Name = "done"
 	stepCancel  flow.Name = "cancel"
 
-	keyDelegatedFrom               = "DelegatedFrom"
-	keyDelegatedTo                 = "DelegatedTo"
-	keyBaseURL                     = "BaseURL"
-	keyUsePreregisteredApplication = "UsePreregisteredApplication"
-	keyIsOAuthConfigured           = "IsOAuthConfigured"
+	keyDelegatedFrom     = "DelegatedFrom"
+	keyDelegatedTo       = "DelegatedTo"
+	keyBaseURL           = "BaseURL"
+	keyIsOAuthConfigured = "IsOAuthConfigured"
 )
 
 func cancelButton() flow.Button {
@@ -209,7 +208,7 @@ func cancelButton() flow.Button {
 func (fm *FlowManager) stepCancel(command string) flow.Step {
 	return flow.NewStep(stepCancel).
 		Terminal().
-		WithText(fmt.Sprintf("GitHub integration setup has stopped. Restart setup later by running `/github %s`. Learn more about the plugin [here](%s).", command, Manifest.HomepageURL)).
+		WithText(fmt.Sprintf("Forgejo integration setup has stopped. Restart setup later by running `/forgejo %s`. Learn more about the plugin [here](%s).", command, Manifest.HomepageURL)).
 		WithColor(flow.ColorDanger)
 }
 
@@ -227,11 +226,10 @@ func continueButton(next flow.Name) flow.Button {
 
 func (fm *FlowManager) getBaseState() flow.State {
 	config := fm.getConfiguration()
-	isOAuthConfigured := config.GitHubOAuthClientID != "" || config.GitHubOAuthClientSecret != ""
+	isOAuthConfigured := config.ForgejoOAuthClientID != "" || config.ForgejoOAuthClientSecret != ""
 	return flow.State{
-		keyBaseURL:                     config.getBaseURL(),
-		keyUsePreregisteredApplication: config.UsePreregisteredApplication,
-		keyIsOAuthConfigured:           isOAuthConfigured,
+		keyBaseURL:           config.getBaseURL(),
+		keyIsOAuthConfigured: isOAuthConfigured,
 	}
 }
 
@@ -290,19 +288,14 @@ func (fm *FlowManager) trackCompleteOauthWizard(userID string) {
 }
 
 func (fm *FlowManager) stepWelcome() flow.Step {
-	welcomePretext := ":wave: Welcome to your GitHub integration! [Learn more](https://github.com/mattermost/mattermost-plugin-github#readme)"
+	welcomePretext := ":wave: Welcome to your Forgejo integration! [Learn more](https://github.com/mattermost/mattermost-plugin-github#readme)"
 
 	welcomeText := `
-{{- if .UsePreregisteredApplication -}}
 Just a few configuration steps to go!
-- **Step 1:** Connect your GitHub account
-- **Step 2:** Create a webhook in GitHub
-{{- else -}}
-Just a few configuration steps to go!
-- **Step 1:** Register an OAuth application in GitHub and enter OAuth values.
-- **Step 2:** Connect your GitHub account
-- **Step 3:** Create a webhook in GitHub
-{{- end -}}`
+- **Step 1:** Register an OAuth application in Forgejo and enter OAuth values.
+- **Step 2:** Connect your Forgejo account
+- **Step 3:** Create a webhook in Forgejo
+`
 
 	return flow.NewStep(stepWelcome).
 		WithText(welcomeText).
@@ -311,18 +304,14 @@ Just a few configuration steps to go!
 }
 
 func (fm *FlowManager) stepDelegateQuestion() flow.Step {
-	delegateQuestionText := "Are you setting this GitHub integration up, or is someone else?"
+	delegateQuestionText := "Are you setting this Forgejo integration up, or is someone else?"
 	return flow.NewStep(stepDelegateQuestion).
 		WithText(delegateQuestionText).
 		WithButton(flow.Button{
 			Name:  "I'll do it myself",
 			Color: flow.ColorPrimary,
 			OnClick: func(f *flow.Flow) (flow.Name, flow.State, error) {
-				if f.GetState().GetBool(keyUsePreregisteredApplication) {
-					return stepOAuthConnect, nil, nil
-				}
-
-				return stepEnterprise, nil, nil
+				return stepBase, nil, nil
 			},
 		}).
 		WithButton(flow.Button{
@@ -372,7 +361,7 @@ func (fm *FlowManager) submitDelegateSelection(f *flow.Flow, submitted map[strin
 
 func (fm *FlowManager) stepDelegateConfirmation() flow.Step {
 	return flow.NewStep(stepDelegateConfirmation).
-		WithText("GitHub integration setup details have been sent to @{{ .DelegatedTo }}").
+		WithText("Forgejo integration setup details have been sent to @{{ .DelegatedTo }}").
 		WithButton(flow.Button{
 			Name:     "Waiting for @{{ .DelegatedTo }}...",
 			Color:    flow.ColorDefault,
@@ -387,36 +376,36 @@ func (fm *FlowManager) stepDelegateComplete() flow.Step {
 		Next(stepDone)
 }
 
-func (fm *FlowManager) stepEnterprise() flow.Step {
-	enterpriseText := "Do you have a GitHub Enterprise account?"
-	return flow.NewStep(stepEnterprise).
-		WithText(enterpriseText).
+func (fm *FlowManager) stepBase() flow.Step {
+	baseText := "Do you have a Forgejo account?"
+	return flow.NewStep(stepBase).
+		WithText(baseText).
 		WithButton(flow.Button{
 			Name:  "Yes",
 			Color: flow.ColorPrimary,
 			Dialog: &model.Dialog{
-				Title:            "Enterprise account",
-				IntroductionText: "Enter an **Enterprise Base URL** and **Enterprise Upload URL** by setting these values to match your GitHub Enterprise URL (Example: https://github.example.com). It's not necessary to have separate Base and Upload URLs.",
+				Title:            "Base config",
+				IntroductionText: "Enter an **Base URL** and **Upload URL** by setting these values to match your Forgejo URL (Example: https://forgejo.example.com). It's not necessary to have separate Base and Upload URLs.",
 				SubmitLabel:      "Save & continue",
 				Elements: []model.DialogElement{
 					{
 
-						DisplayName: "Enterprise Base URL",
+						DisplayName: "Base URL",
 						Name:        "base_url",
 						Type:        "text",
 						SubType:     "url",
-						Placeholder: "Enter Enterprise Base URL",
+						Placeholder: "Enter Base URL",
 					},
 					{
-						DisplayName: "Enterprise Upload URL",
+						DisplayName: "Upload URL",
 						Name:        "upload_url",
 						Type:        "text",
 						SubType:     "url",
-						Placeholder: "Enter Enterprise Upload URL",
+						Placeholder: "Enter Upload URL",
 					},
 				},
 			},
-			OnDialogSubmit: fm.submitEnterpriseConfig,
+			OnDialogSubmit: fm.submitBaseConfig,
 		}).
 		WithButton(flow.Button{
 			Name:    "No",
@@ -426,7 +415,7 @@ func (fm *FlowManager) stepEnterprise() flow.Step {
 		WithButton(cancelButton())
 }
 
-func (fm *FlowManager) submitEnterpriseConfig(f *flow.Flow, submitted map[string]interface{}) (flow.Name, flow.State, map[string]string, error) {
+func (fm *FlowManager) submitBaseConfig(f *flow.Flow, submitted map[string]interface{}) (flow.Name, flow.State, map[string]string, error) {
 	errorList := map[string]string{}
 
 	baseURLRaw, ok := submitted["base_url"]
@@ -466,8 +455,8 @@ func (fm *FlowManager) submitEnterpriseConfig(f *flow.Flow, submitted map[string
 	}
 
 	config := fm.getConfiguration()
-	config.EnterpriseBaseURL = baseURL
-	config.EnterpriseUploadURL = uploadURL
+	config.BaseURL = baseURL
+	config.UploadURL = uploadURL
 	config.sanitize()
 
 	configMap, err := config.ToMap()
@@ -492,12 +481,12 @@ func (fm *FlowManager) stepOAuthInfo() flow.Step {
 	}
 
 	oauthPretext := `
-##### :white_check_mark: Step 1: Register an OAuth Application in GitHub
-You must first register the Mattermost GitHub Plugin as an authorized OAuth app.`
+##### :white_check_mark: Step 1: Register an OAuth Application in Forgejo
+You must first register the Mattermost Forgejo Plugin as an authorized OAuth app.`
 	oauthMessage := fmt.Sprintf(""+
 		"1. In a browser, go to {{ .BaseURL}}settings/applications/new.\n"+
 		"2. Set the following values:\n"+
-		"	- Application name: `Mattermost GitHub Plugin - <your company name>`\n"+
+		"	- Application name: `Mattermost Forgejo Plugin - <your company name>`\n"+
 		"	- Homepage URL: `https://github.com/mattermost/mattermost-plugin-github`\n"+
 		"	- Authorization callback URL: `%s`\n"+
 		"3. Select **Register application**\n"+
@@ -516,28 +505,28 @@ You must first register the Mattermost GitHub Plugin as an authorized OAuth app.
 
 func (fm *FlowManager) stepOAuthInput() flow.Step {
 	return flow.NewStep(stepOAuthInput).
-		WithText("Click the Continue button below to open a dialog to enter the **GitHub OAuth Client ID** and **GitHub OAuth Client Secret**.").
+		WithText("Click the Continue button below to open a dialog to enter the **Forgejo OAuth Client ID** and **Forgejo OAuth Client Secret**.").
 		WithButton(flow.Button{
 			Name:  "Continue",
 			Color: flow.ColorPrimary,
 			Dialog: &model.Dialog{
-				Title:            "GitHub OAuth values",
-				IntroductionText: "Please enter the **GitHub OAuth Client ID** and **GitHub OAuth Client Secret** you copied in a previous step.{{ if .IsOAuthConfigured }}\n\n**Any existing OAuth configuration will be overwritten.**{{end}}",
+				Title:            "Forgejo OAuth values",
+				IntroductionText: "Please enter the **Forgejo OAuth Client ID** and **Forgejo OAuth Client Secret** you copied in a previous step.{{ if .IsOAuthConfigured }}\n\n**Any existing OAuth configuration will be overwritten.**{{end}}",
 				SubmitLabel:      "Save & continue",
 				Elements: []model.DialogElement{
 					{
-						DisplayName: "GitHub OAuth Client ID",
+						DisplayName: "Forgejo OAuth Client ID",
 						Name:        "client_id",
 						Type:        "text",
 						SubType:     "text",
-						Placeholder: "Enter GitHub OAuth Client ID",
+						Placeholder: "Enter Forgejo OAuth Client ID",
 					},
 					{
-						DisplayName: "GitHub OAuth Client Secret",
+						DisplayName: "Forgejo OAuth Client Secret",
 						Name:        "client_secret",
 						Type:        "text",
 						SubType:     "text",
-						Placeholder: "Enter GitHub OAuth Client Secret",
+						Placeholder: "Enter Forgejo OAuth Client Secret",
 					},
 				},
 			},
@@ -584,8 +573,8 @@ func (fm *FlowManager) submitOAuthConfig(f *flow.Flow, submitted map[string]inte
 	}
 
 	config := fm.getConfiguration()
-	config.GitHubOAuthClientID = clientID
-	config.GitHubOAuthClientSecret = clientSecret
+	config.ForgejoOAuthClientID = clientID
+	config.ForgejoOAuthClientSecret = clientSecret
 
 	configMap, err := config.ToMap()
 	if err != nil {
@@ -601,7 +590,7 @@ func (fm *FlowManager) submitOAuthConfig(f *flow.Flow, submitted map[string]inte
 }
 
 func (fm *FlowManager) stepOAuthConnect() flow.Step {
-	connectPretext := "##### :white_check_mark: Step {{ if .UsePreregisteredApplication }}1{{ else }}2{{ end }}: Connect your GitHub account"
+	connectPretext := "##### :white_check_mark: Step 2: Connect your Forgejo account"
 	connectURL, err := buildPluginURL(fm.client, "oauth", "connect")
 	if err != nil {
 		fm.client.Log.Warn("Failed to build connectURL", "err", err)
@@ -641,8 +630,8 @@ func (fm *FlowManager) trackCompleteWebhookWizard(userID string) {
 }
 
 func (fm *FlowManager) stepWebhookQuestion() flow.Step {
-	questionPretext := `##### :white_check_mark: Step {{ if .UsePreregisteredApplication }}2{{ else }}3{{ end }}: Create a Webhook in GitHub
-The final setup step requires a Mattermost System Admin to create a webhook for each GitHub organization or repository to receive notifications for, or want to subscribe to.`
+	questionPretext := `##### :white_check_mark: Step 3: Create a Webhook in Forgejo
+The final setup step requires a Mattermost System Admin to create a webhook for each Forgejo organization or repository to receive notifications for, or want to subscribe to.`
 	return flow.NewStep(stepWebhookQuestion).
 		WithText("Do you want to create a webhook?").
 		WithPretext(questionPretext).
@@ -655,12 +644,12 @@ The final setup step requires a Mattermost System Admin to create a webhook for 
 				Elements: []model.DialogElement{
 					{
 
-						DisplayName: "GitHub repository or organization name",
+						DisplayName: "Forgejo repository or organization name",
 						Name:        "repo_org",
 						Type:        "text",
 						SubType:     "text",
-						Placeholder: "Enter GitHub repository or organization name",
-						HelpText:    "Specify the GitHub repository or organization to connect to Mattermost. For example, mattermost/mattermost-server.",
+						Placeholder: "Enter Forgejo repository or organization name",
+						HelpText:    "Specify the Forgejo repository or organization to connect to Mattermost. For example, mattermost/mattermost-server.",
 					},
 				},
 			},
@@ -735,7 +724,7 @@ func (fm *FlowManager) submitWebhook(f *flow.Flow, submitted map[string]interfac
 	}
 
 	if resp.StatusCode == http.StatusNotFound {
-		err = errors.Errorf("It seems like you don't have privileges to create webhooks in %s. Ask an admin of that %s to run /github setup webhook for you.", fullName, repoOrOrg)
+		err = errors.Errorf("It seems like you don't have privileges to create webhooks in %s. Ask an admin of that %s to run /forgejo setup webhook for you.", fullName, repoOrOrg)
 		return "", nil, nil, err
 	}
 
@@ -766,9 +755,9 @@ func (fm *FlowManager) submitWebhook(f *flow.Flow, submitted map[string]interfac
 }
 
 func (fm *FlowManager) stepWebhookWarning() flow.Step {
-	warnText := "The GitHub plugin uses a webhook to connect a GitHub account to Mattermost to listen for incoming GitHub events. " +
+	warnText := "The Forgejo plugin uses a webhook to connect a Forgejo account to Mattermost to listen for incoming Forgejo events. " +
 		"You can't subscribe a channel to a repository for notifications until webhooks are configured.\n" +
-		"Restart setup later by running `/github setup webhook`"
+		"Restart setup later by running `/forgejo setup webhook`"
 
 	return flow.NewStep(stepWebhookWarning).
 		WithText(warnText).
@@ -778,8 +767,8 @@ func (fm *FlowManager) stepWebhookWarning() flow.Step {
 
 func (fm *FlowManager) stepWebhookConfirmation() flow.Step {
 	return flow.NewStep(stepWebhookConfirmation).
-		WithTitle("Success! :tada: You've successfully set up your Mattermost GitHub integration! ").
-		WithText("Use `/github subscriptions add` to subscribe any Mattermost channel to your GitHub repository. [Learn more](https://github.com/mattermost/mattermost-plugin-github#slash-commands)").
+		WithTitle("Success! :tada: You've successfully set up your Mattermost Forgejo integration! ").
+		WithText("Use `/forgejo subscriptions add` to subscribe any Mattermost channel to your Forgejo repository. [Learn more](https://github.com/mattermost/mattermost-plugin-github#slash-commands)").
 		OnRender(func(f *flow.Flow) { fm.trackCompleteWebhookWizard(f.UserID) }).
 		Next("")
 }
@@ -812,7 +801,7 @@ func (fm *FlowManager) trackCompletAnnouncementWizard(userID string) {
 func (fm *FlowManager) stepAnnouncementQuestion() flow.Step {
 	defaultMessage := "Hi team,\n" +
 		"\n" +
-		"We've set up the Mattermost GitHub plugin to enable notifications from GitHub in Mattermost. To get started, run the `/github connect` slash command from any channel within Mattermost to connect that channel with GitHub. See the [documentation](https://github.com/mattermost/mattermost-plugin-github/blob/master/README.md#slash-commands) for details on using the GitHub plugin."
+		"We've set up the Mattermost Forgejo plugin to enable notifications from Forgejo in Mattermost. To get started, run the `/forgejo connect` slash command from any channel within Mattermost to connect that channel with GitHub. See the [documentation](https://github.com/mattermost/mattermost-plugin-github/blob/master/README.md#slash-commands) for details on using the GitHub plugin."
 
 	return flow.NewStep(stepAnnouncementQuestion).
 		WithText("Want to let your team know?").

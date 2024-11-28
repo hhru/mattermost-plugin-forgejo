@@ -69,35 +69,32 @@ test.beforeEach(async ({pw}) => {
     await cleanUpBotDMs(adminClient, adminUser.id, pluginId);
 });
 
-type GithubPluginSettings = {
+type ForgejoPluginSettings = {
     connecttoprivatebydefault: string | null;
     enablecodepreview: string;
     enableleftsidebar: boolean;
     enableprivaterepo: boolean | null;
     enablewebhookeventlogging: boolean;
     encryptionkey: string;
-    enterprisebaseurl: string;
-    enterpriseuploadurl: string;
-    githuboauthclientid: string;
-    githuboauthclientsecret: string;
-    githuborg: string | null;
-    usepreregisteredapplication: boolean;
+    baseurl: string;
+    uploadurl: string;
+    forgejooauthclientid: string;
+    forgejooauthclientsecret: string;
+    forgejoorg: string | null;
     webhooksecret: string;
 }
 
-const githubConfig: GithubPluginSettings = {
-    githuboauthclientid: '',
-    githuboauthclientsecret: '',
-
+const githubConfig: ForgejoPluginSettings = {
+    forgejooauthclientid: '',
+    forgejooauthclientsecret: '',
     connecttoprivatebydefault: null,
     enablecodepreview: 'public',
     enableleftsidebar: true,
     enableprivaterepo: null,
     enablewebhookeventlogging: false,
     encryptionkey: 'S9YasItflsENXnrnKUhMJkdosXTsr6Tc',
-    enterprisebaseurl: '',
-    enterpriseuploadurl: '',
-    githuborg: null,
-    usepreregisteredapplication: false,
+    baseurl: '',
+    uploadurl: '',
+    forgejoorg: null,
     webhooksecret: 'w7HfrdZ+mtJKnWnsmHMh8eKzWpQH7xET',
 };

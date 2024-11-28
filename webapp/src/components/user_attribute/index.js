@@ -4,7 +4,7 @@
 import {connect} from 'react-redux';
 import {bindActionCreators} from 'redux';
 
-import {getGitHubUser} from '../../actions';
+import {getForgejoUser} from '../../actions';
 
 import manifest from '../../manifest';
 
@@ -13,19 +13,19 @@ import UserAttribute from './user_attribute.jsx';
 function mapStateToProps(state, ownProps) {
     const {id: pluginId} = manifest;
     const id = ownProps.user ? ownProps.user.id : '';
-    const user = state[`plugins-${pluginId}`].githubUsers[id] || {};
+    const user = state[`plugins-${pluginId}`].forgejoUsers[id] || {};
 
     return {
         id,
         username: user.username,
-        enterpriseURL: state[`plugins-${pluginId}`].enterpriseURL,
+        baseURL: state[`plugins-${pluginId}`].baseURL,
     };
 }
 
 function mapDispatchToProps(dispatch) {
     return {
         actions: bindActionCreators({
-            getGitHubUser,
+            getForgejoUser,
         }, dispatch),
     };
 }

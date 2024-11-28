@@ -25,19 +25,18 @@ import (
 // If you add non-reference types to your configuration struct, be sure to rewrite Clone as a deep
 // copy appropriate for your types.
 type Configuration struct {
-	GitHubOrg                      string `json:"githuborg"`
-	GitHubOAuthClientID            string `json:"githuboauthclientid"`
-	GitHubOAuthClientSecret        string `json:"githuboauthclientsecret"`
+	ForgejoOrg                     string `json:"forgejoorg"`
+	ForgejoOAuthClientID           string `json:"forgejooauthclientid"`
+	ForgejoOAuthClientSecret       string `json:"forgejooauthclientsecret"`
 	WebhookSecret                  string `json:"webhooksecret"`
 	EnableLeftSidebar              bool   `json:"enableleftsidebar"`
 	EnablePrivateRepo              bool   `json:"enableprivaterepo"`
 	ConnectToPrivateByDefault      bool   `json:"connecttoprivatebydefault"`
 	EncryptionKey                  string `json:"encryptionkey"`
-	EnterpriseBaseURL              string `json:"enterprisebaseurl"`
-	EnterpriseUploadURL            string `json:"enterpriseuploadurl"`
+	BaseURL                        string `json:"baseurl"`
+	UploadURL                      string `json:"uploadurl"`
 	EnableCodePreview              string `json:"enablecodepreview"`
 	EnableWebhookEventLogging      bool   `json:"enablewebhookeventlogging"`
-	UsePreregisteredApplication    bool   `json:"usepreregisteredapplication"`
 	ShowAuthorInCommitNotification bool   `json:"showauthorincommitnotification"`
 }
 
@@ -78,40 +77,34 @@ func (c *Configuration) setDefaults(isCloud bool) (bool, error) {
 		changed = true
 	}
 
-	if isCloud && !c.UsePreregisteredApplication && !c.IsOAuthConfigured() {
-		c.UsePreregisteredApplication = true
-		changed = true
-	}
-
 	return changed, nil
 }
 
 func (c *Configuration) getBaseURL() string {
-	if c.EnterpriseBaseURL != "" {
-		return c.EnterpriseBaseURL + "/"
+	if c.BaseURL != "" {
+		return c.BaseURL + "/"
 	}
 
-	return "https://github.com/"
+	return "https://forgejo.pyn.ru/"
 }
 
 func (c *Configuration) sanitize() {
-	c.EnterpriseBaseURL = strings.TrimRight(c.EnterpriseBaseURL, "/")
-	c.EnterpriseUploadURL = strings.TrimRight(c.EnterpriseUploadURL, "/")
+	c.BaseURL = strings.TrimRight(c.BaseURL, "/")
+	c.UploadURL = strings.TrimRight(c.UploadURL, "/")
 
 	// Trim spaces around org and OAuth credentials
-	c.GitHubOrg = strings.TrimSpace(c.GitHubOrg)
-	c.GitHubOAuthClientID = strings.TrimSpace(c.GitHubOAuthClientID)
-	c.GitHubOAuthClientSecret = strings.TrimSpace(c.GitHubOAuthClientSecret)
+	c.ForgejoOrg = strings.TrimSpace(c.ForgejoOrg)
+	c.ForgejoOAuthClientID = strings.TrimSpace(c.ForgejoOAuthClientID)
+	c.ForgejoOAuthClientSecret = strings.TrimSpace(c.ForgejoOAuthClientSecret)
 }
 
 func (c *Configuration) IsOAuthConfigured() bool {
-	return (c.GitHubOAuthClientID != "" && c.GitHubOAuthClientSecret != "") ||
-		c.UsePreregisteredApplication
+	return c.ForgejoOAuthClientID != "" && c.ForgejoOAuthClientSecret != ""
 }
 
-// IsSASS return if SASS GitHub at https://github.com is used.
+// IsSASS return if SASS Forgejo at https://Forgejo.com is used.
 func (c *Configuration) IsSASS() bool {
-	return c.EnterpriseBaseURL == "" && c.EnterpriseUploadURL == ""
+	return c.BaseURL == "" && c.UploadURL == ""
 }
 
 func (c *Configuration) ClientConfiguration() map[string]interface{} {
@@ -129,17 +122,11 @@ func (c *Configuration) Clone() *Configuration {
 
 // IsValid checks if all needed fields are set.
 func (c *Configuration) IsValid() error {
-	if !c.UsePreregisteredApplication {
-		if c.GitHubOAuthClientID == "" {
-			return errors.New("must have a github oauth client id")
-		}
-		if c.GitHubOAuthClientSecret == "" {
-			return errors.New("must have a github oauth client secret")
-		}
+	if c.ForgejoOAuthClientID == "" {
+		return errors.New("must have a forgejo oauth client id")
 	}
-
-	if c.UsePreregisteredApplication && c.EnterpriseBaseURL != "" {
-		return errors.New("cannot use pre-registered application with GitHub enterprise")
+	if c.ForgejoOAuthClientSecret == "" {
+		return errors.New("must have a forgejo oauth client secret")
 	}
 
 	if c.EncryptionKey == "" {
@@ -252,11 +239,11 @@ func generateSecret() (string, error) {
 }
 
 func (c *Configuration) getOrganizations() []string {
-	if c.GitHubOrg == "" {
+	if c.ForgejoOrg == "" {
 		return []string{}
 	}
 
-	list := strings.Split(c.GitHubOrg, ",")
+	list := strings.Split(c.ForgejoOrg, ",")
 	allOrgs := []string{}
 	for _, org := range list {
 		org = strings.TrimSpace(strings.ToLower(org))
