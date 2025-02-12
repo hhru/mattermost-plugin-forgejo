@@ -7,7 +7,7 @@
 // ***************************************************************
 import {test, expect} from '@e2e-support/test_fixture';
 
-import TodoMessage, {GithubRHSCategory} from '../../support/components/todo_message';
+import TodoMessage, {ForgejoRHSCategory} from '../../support/components/todo_message';
 import {messages} from '../../support/constants';
 import {getGithubBotDMPageURL, waitForNewMessages} from '../../support/utils';
 import {getBotTagFromPost, getPostAuthor} from '../../support/components/post';
@@ -45,21 +45,21 @@ export default {
 
                 // * Assert that titles are there for each section
                 // Text are fixed and checked inside todo component handler
-                await expect(todo.getTitle(GithubRHSCategory.OPEN_PR)).toBeVisible();
-                await expect(todo.getTitle(GithubRHSCategory.ASSIGNMENTS)).toBeVisible();
-                await expect(todo.getTitle(GithubRHSCategory.REVIEW_PR)).toBeVisible();
-                await expect(todo.getTitle(GithubRHSCategory.UNREAD)).toBeVisible();
+                await expect(todo.getTitle(ForgejoRHSCategory.OPEN_PR)).toBeVisible();
+                await expect(todo.getTitle(ForgejoRHSCategory.ASSIGNMENTS)).toBeVisible();
+                await expect(todo.getTitle(ForgejoRHSCategory.REVIEW_PR)).toBeVisible();
+                await expect(todo.getTitle(ForgejoRHSCategory.UNREAD)).toBeVisible();
 
                 // * Assert that description are there for each section
                 // Singular/plurals are not taken into account: ticket separated at https://mattermost.atlassian.net/browse/MM-52416
                 // Counters may vary and should be explicitely changed once the test accounts are set
-                await expect(todo.getDesc(GithubRHSCategory.OPEN_PR)).toHaveText('You have 1 open pull requests:');
-                await expect(todo.getDesc(GithubRHSCategory.ASSIGNMENTS)).toHaveText('You have 19 assignments:');
-                await expect(todo.getDesc(GithubRHSCategory.REVIEW_PR)).toHaveText('You have 1 pull requests awaiting your review:');
-                await expect(todo.getDesc(GithubRHSCategory.UNREAD)).toHaveText('You have 1 unread messages:');
+                await expect(todo.getDesc(ForgejoRHSCategory.OPEN_PR)).toHaveText('You have 1 open pull requests:');
+                await expect(todo.getDesc(ForgejoRHSCategory.ASSIGNMENTS)).toHaveText('You have 19 assignments:');
+                await expect(todo.getDesc(ForgejoRHSCategory.REVIEW_PR)).toHaveText('You have 1 pull requests awaiting your review:');
+                await expect(todo.getDesc(ForgejoRHSCategory.UNREAD)).toHaveText('You have 1 unread messages:');
 
                 // * Assert the open pull request list has 1 items
-                const openPr = await todo.getList(GithubRHSCategory.OPEN_PR);
+                const openPr = await todo.getList(ForgejoRHSCategory.OPEN_PR);
                 await expect(openPr.locator('li')).toHaveCount(1);
 
                 // * Assert the open pull request links are correct <REPO> <PR>
@@ -67,7 +67,7 @@ export default {
                 await expect(openPr.locator('li').nth(0).locator('a').nth(1)).toHaveAttribute('href', prRegex);
 
                 // * Assert the review request list has 1 items
-                const reviewPr = await todo.getList(GithubRHSCategory.REVIEW_PR);
+                const reviewPr = await todo.getList(ForgejoRHSCategory.REVIEW_PR);
                 await expect(reviewPr.locator('li')).toHaveCount(1);
 
                 // * Assert the pull request links are correct <REPO> <PR>
@@ -75,7 +75,7 @@ export default {
                 await expect(reviewPr.locator('li').nth(0).locator('a').nth(1)).toHaveAttribute('href', prRegex);
 
                 // * Assert the assignments list has 1 items
-                const assignments = await todo.getList(GithubRHSCategory.ASSIGNMENTS);
+                const assignments = await todo.getList(ForgejoRHSCategory.ASSIGNMENTS);
                 await expect(assignments.locator('li')).toHaveCount(19);
 
                 // * Assert the assignments links are correct <REPO> <ISSUE>
@@ -83,7 +83,7 @@ export default {
                 await expect(assignments.locator('li').nth(0).locator('a').nth(1)).toHaveAttribute('href', issueRegex);
 
                 // * Assert the unread has 1 items
-                const unread = await todo.getList(GithubRHSCategory.UNREAD);
+                const unread = await todo.getList(ForgejoRHSCategory.UNREAD);
                 await expect(unread.locator('li')).toHaveCount(1);
 
                 // # Refresh

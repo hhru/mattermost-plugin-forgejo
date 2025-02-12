@@ -14,7 +14,7 @@ import {runOAuthServer} from './init_mock_oauth_server';
 import {preferencesForUser} from './user';
 
 const pluginDistPath = path.join(__dirname, '../../../dist');
-const pluginId = 'github';
+const pluginId = 'forgejo';
 
 // # One time tasks
 test.beforeAll(async ({pw}) => {

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -84,7 +85,9 @@ func TestGetConfiguration(t *testing.T) {
 func TestGetToken(t *testing.T) {
 	t.Run("Valid", func(t *testing.T) {
 		token := &oauth2.Token{
-			AccessToken: "abcdef",
+			AccessToken:  "abcdef",
+			RefreshToken: "cdfafasd",
+			Expiry:       time.Now(),
 		}
 
 		b := new(bytes.Buffer)

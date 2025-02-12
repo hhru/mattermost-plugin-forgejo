@@ -65,7 +65,6 @@ function shouldUpdateDetails(prs, prevPrs, targetState, currentState, prevState)
 
 export default class SidebarRight extends React.PureComponent {
     static propTypes = {
-        username: PropTypes.string,
         orgs: PropTypes.array.isRequired,
         baseURL: PropTypes.string,
         reviews: PropTypes.arrayOf(PropTypes.object),
@@ -107,7 +106,7 @@ export default class SidebarRight extends React.PureComponent {
             orgQuery += ('+org%3A' + org);
             return orgQuery;
         });
-        const {yourPrs, reviews, unreads, yourAssignments, username, rhsState} = this.props;
+        const {yourPrs, reviews, unreads, yourAssignments, rhsState} = this.props;
 
         let title = '';
         let forgejoItems = [];
@@ -118,13 +117,13 @@ export default class SidebarRight extends React.PureComponent {
 
             forgejoItems = yourPrs;
             title = 'Your Open Pull Requests';
-            listUrl = baseURL + '/pulls?q=is%3Aopen+is%3Apr+author%3A' + username + '+archived%3Afalse' + orgQuery;
+            listUrl = baseURL + '/pulls?type=created_by&sort=recentupdate&state=open&q=&fuzzy=true';
 
             break;
         case RHSStates.REVIEWS:
 
             forgejoItems = reviews;
-            listUrl = baseURL + '/pulls?q=is%3Aopen+is%3Apr+review-requested%3A' + username + '+archived%3Afalse' + orgQuery;
+            listUrl = baseURL + '/pulls?type=review_requested&sort=recentupdate&state=open&q=&fuzzy=true';
             title = 'Pull Requests Needing Review';
 
             break;
@@ -138,7 +137,7 @@ export default class SidebarRight extends React.PureComponent {
 
             forgejoItems = yourAssignments;
             title = 'Your Assignments';
-            listUrl = baseURL + '/pulls?q=is%3Aopen+archived%3Afalse+assignee%3A' + username + orgQuery;
+            listUrl = baseURL + '/pulls?type=assigned&sort=recentupdate&state=open&q=&fuzzy=true';
             break;
         default:
             break;

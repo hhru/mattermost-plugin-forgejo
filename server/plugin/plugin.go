@@ -30,17 +30,12 @@ const (
 	forgejoUsernameKey    = "_forgejousername"
 	forgejoPrivateRepoKey = "_forgejoprivate"
 
-	mm34646MutexKey = "mm34646_token_reset_mutex"
-	mm34646DoneKey  = "mm34646_token_reset_done"
-
 	wsEventConnect    = "connect"
 	wsEventDisconnect = "disconnect"
 	// WSEventConfigUpdate is the WebSocket event to update the configurations on webapp.
 	WSEventConfigUpdate = "config_update"
 	wsEventRefresh      = "refresh"
 	wsEventCreateIssue  = "createIssue"
-
-	WSEventRefresh = "refresh"
 
 	settingButtonsTeam   = "team"
 	settingNotifications = "notifications"
@@ -51,8 +46,6 @@ const (
 
 	notificationReasonSubscribed = "subscribed"
 	dailySummary                 = "_dailySummary"
-
-	chimeraGitHubAppIdentifier = "plugin-github"
 )
 
 var (
@@ -171,8 +164,13 @@ func (p *Plugin) githubConnectUser(ctx context.Context, info *ForgejoUserInfo) *
 }
 
 func (p *Plugin) forgejoConnect(info *ForgejoUserInfo) *http.Client {
+	config, err := p.getOAuthConfig()
+	if err != nil {
+		p.client.Log.Error("Failed to create OAuth config", "error", err.Error())
+		return nil
+	}
 	tok := *info.Token
-	return createOauth2Client(tok)
+	return config.Client(context.Background(), &tok)
 }
 
 func (p *Plugin) githubConnectToken(token oauth2.Token) *github.Client {
@@ -188,14 +186,12 @@ func (p *Plugin) githubConnectToken(token oauth2.Token) *github.Client {
 }
 
 func GetGitHubClient(token oauth2.Token, config *Configuration) (*github.Client, error) {
-	tc := createOauth2Client(token)
+	oauthConfig, err := getOauthConfig(config)
+	if err != nil {
+		return nil, err
+	}
+	tc := oauthConfig.Client(context.Background(), &token)
 	return getGitHubClient(tc, config)
-}
-
-func createOauth2Client(token oauth2.Token) *http.Client {
-	ts := oauth2.StaticTokenSource(&token)
-	tc := oauth2.NewClient(context.Background(), ts)
-	return tc
 }
 
 func getGitHubClient(authenticatedClient *http.Client, config *Configuration) (*github.Client, error) {
@@ -283,13 +279,6 @@ func (p *Plugin) OnActivate() error {
 	p.flowManager = flowManager
 
 	registerForgejoToUsernameMappingCallback(p.getGitHubToUsernameMapping)
-
-	go func() {
-		resetErr := p.forceResetAllMM34646()
-		if resetErr != nil {
-			p.client.Log.Debug("failed to reset user tokens", "error", resetErr.Error())
-		}
-	}()
 	return nil
 }
 
@@ -513,8 +502,17 @@ func (p *Plugin) MessageWillBePosted(c *plugin.Context, post *model.Post) (*mode
 	return post, ""
 }
 
-func (p *Plugin) getOAuthConfig(privateAllowed bool) (*oauth2.Config, error) {
-	config := p.getConfiguration()
+func (p *Plugin) getOAuthConfig() (*oauth2.Config, error) {
+	oauthConfig, err := getOauthConfig(p.getConfiguration())
+	redirectURL, err := buildPluginURL(p.client, "oauth", "complete")
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create PluginURL")
+	}
+	oauthConfig.RedirectURL = redirectURL
+	return oauthConfig, err
+}
+
+func getOauthConfig(config *Configuration) (*oauth2.Config, error) {
 	baseURL := config.getBaseURL()
 	if testOAuthServerURL != "" {
 		baseURL = testOAuthServerURL + "/"
@@ -528,15 +526,10 @@ func (p *Plugin) getOAuthConfig(privateAllowed bool) (*oauth2.Config, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to build TokenURL")
 	}
-	redirectURL, err := buildPluginURL(p.client, "oauth", "complete")
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to create PluginURL")
-	}
 
 	return &oauth2.Config{
 		ClientID:     config.ForgejoOAuthClientID,
 		ClientSecret: config.ForgejoOAuthClientSecret,
-		RedirectURL:  redirectURL,
 		Endpoint: oauth2.Endpoint{
 			AuthURL:   authURL,
 			TokenURL:  tokenURL,
@@ -552,9 +545,6 @@ type ForgejoUserInfo struct {
 	LastToDoPostAt      int64
 	Settings            *UserSettings
 	AllowedPrivateRepos bool
-
-	// MM34646ResetTokenDone is set for a user whose token has been reset for MM-34646.
-	MM34646ResetTokenDone bool
 }
 
 type UserSettings struct {
@@ -567,12 +557,17 @@ type UserSettings struct {
 func (p *Plugin) storeGitHubUserInfo(info *ForgejoUserInfo) error {
 	config := p.getConfiguration()
 
-	encryptedToken, err := encrypt([]byte(config.EncryptionKey), info.Token.AccessToken)
-	if err != nil {
-		return errors.Wrap(err, "error occurred while encrypting access token")
+	encryptedAccessToken, accessErr := encrypt([]byte(config.EncryptionKey), info.Token.AccessToken)
+	if accessErr != nil {
+		return errors.Wrap(accessErr, "error occurred while encrypting access token")
+	}
+	encryptedRefreshToken, refreshErr := encrypt([]byte(config.EncryptionKey), info.Token.RefreshToken)
+	if refreshErr != nil {
+		return errors.Wrap(refreshErr, "error occurred while encrypting refresh token")
 	}
 
-	info.Token.AccessToken = encryptedToken
+	info.Token.AccessToken = encryptedAccessToken
+	info.Token.RefreshToken = encryptedRefreshToken
 
 	if _, err := p.store.Set(info.UserID+forgejoTokenKey, info); err != nil {
 		return errors.Wrap(err, "error occurred while trying to store user info into KV store")
@@ -593,13 +588,20 @@ func (p *Plugin) getGitHubUserInfo(userID string) (*ForgejoUserInfo, *APIErrorRe
 		return nil, &APIErrorResponse{ID: apiErrorIDNotConnected, Message: "Must connect user account to Forgejo first.", StatusCode: http.StatusBadRequest}
 	}
 
-	unencryptedToken, err := decrypt([]byte(config.EncryptionKey), userInfo.Token.AccessToken)
-	if err != nil {
-		p.client.Log.Warn("Failed to decrypt access token", "error", err.Error())
+	unencryptedAccessToken, accessErr := decrypt([]byte(config.EncryptionKey), userInfo.Token.AccessToken)
+	if accessErr != nil {
+		p.client.Log.Warn("Failed to decrypt access token", "error", accessErr.Error())
 		return nil, &APIErrorResponse{ID: "", Message: "Unable to decrypt access token.", StatusCode: http.StatusInternalServerError}
 	}
 
-	userInfo.Token.AccessToken = unencryptedToken
+	unencryptedRefreshToken, refreshErr := decrypt([]byte(config.EncryptionKey), userInfo.Token.RefreshToken)
+	if refreshErr != nil {
+		p.client.Log.Warn("Failed to decrypt refresh token", "error", refreshErr.Error())
+		return nil, &APIErrorResponse{ID: "", Message: "Unable to decrypt refresh token.", StatusCode: http.StatusInternalServerError}
+	}
+
+	userInfo.Token.AccessToken = unencryptedAccessToken
+	userInfo.Token.RefreshToken = unencryptedRefreshToken
 
 	return userInfo, nil
 }

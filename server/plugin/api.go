@@ -173,12 +173,12 @@ func (p *Plugin) initializeAPI() {
 
 	p.router.HandleFunc("/webhook", p.handleWebhook).Methods(http.MethodPost)
 
-	oauthRouter.HandleFunc("/connect", p.checkAuth(p.attachContext(p.connectUserToGitHub), ResponseTypePlain)).Methods(http.MethodGet)
-	oauthRouter.HandleFunc("/complete", p.checkAuth(p.attachContext(p.completeConnectUserToGitHub), ResponseTypePlain)).Methods(http.MethodGet)
+	oauthRouter.HandleFunc("/connect", p.checkAuth(p.attachContext(p.connectUserToForgejo), ResponseTypePlain)).Methods(http.MethodGet)
+	oauthRouter.HandleFunc("/complete", p.checkAuth(p.attachContext(p.completeConnectUserToForgejo), ResponseTypePlain)).Methods(http.MethodGet)
 
 	apiRouter.HandleFunc("/connected", p.attachContext(p.getConnected)).Methods(http.MethodGet)
 
-	apiRouter.HandleFunc("/user", p.checkAuth(p.attachContext(p.getGitHubUser), ResponseTypeJSON)).Methods(http.MethodPost)
+	apiRouter.HandleFunc("/user", p.checkAuth(p.attachContext(p.getForgejoUser), ResponseTypeJSON)).Methods(http.MethodPost)
 	apiRouter.HandleFunc("/todo", p.checkAuth(p.attachUserContext(p.postToDo), ResponseTypeJSON)).Methods(http.MethodPost)
 	apiRouter.HandleFunc("/prsdetails", p.checkAuth(p.attachUserContext(p.getPrsDetails), ResponseTypePlain)).Methods(http.MethodPost)
 	apiRouter.HandleFunc("/searchissues", p.checkAuth(p.attachUserContext(p.searchIssues), ResponseTypePlain)).Methods(http.MethodGet)
@@ -316,14 +316,14 @@ func (p *Plugin) ServeHTTP(c *plugin.Context, w http.ResponseWriter, r *http.Req
 	p.router.ServeHTTP(w, r)
 }
 
-func (p *Plugin) connectUserToGitHub(c *Context, w http.ResponseWriter, r *http.Request) {
+func (p *Plugin) connectUserToForgejo(c *Context, w http.ResponseWriter, r *http.Request) {
 	privateAllowed := false
 	pValBool, _ := strconv.ParseBool(r.URL.Query().Get("private"))
 	if pValBool {
 		privateAllowed = true
 	}
 
-	conf, err := p.getOAuthConfig(privateAllowed)
+	conf, err := p.getOAuthConfig()
 	if err != nil {
 		c.Log.WithError(err).Warnf("Failed to generate OAuthConfig")
 		http.Error(w, "error generating OAuthConfig", http.StatusBadRequest)
@@ -343,7 +343,7 @@ func (p *Plugin) connectUserToGitHub(c *Context, w http.ResponseWriter, r *http.
 		return
 	}
 
-	url := conf.AuthCodeURL(state.Token, oauth2.AccessTypeOffline)
+	url := conf.AuthCodeURL(state.Token, oauth2.AccessTypeOnline)
 
 	ch := p.oauthBroker.SubscribeOAuthComplete(c.UserID)
 
@@ -377,7 +377,7 @@ func (p *Plugin) connectUserToGitHub(c *Context, w http.ResponseWriter, r *http.
 	http.Redirect(w, r, url, http.StatusFound)
 }
 
-func (p *Plugin) completeConnectUserToGitHub(c *Context, w http.ResponseWriter, r *http.Request) {
+func (p *Plugin) completeConnectUserToForgejo(c *Context, w http.ResponseWriter, r *http.Request) {
 	var rErr error
 	defer func() {
 		p.oauthBroker.publishOAuthComplete(c.UserID, rErr, false)
@@ -418,7 +418,7 @@ func (p *Plugin) completeConnectUserToGitHub(c *Context, w http.ResponseWriter, 
 		return
 	}
 
-	conf, err := p.getOAuthConfig(state.PrivateAllowed)
+	conf, err := p.getOAuthConfig()
 	if err != nil {
 		c.Log.WithError(err).Warnf("Failed to generate OAuthConfig")
 		http.Error(w, "error generating OAuthConfig", http.StatusBadRequest)
@@ -456,8 +456,7 @@ func (p *Plugin) completeConnectUserToGitHub(c *Context, w http.ResponseWriter, 
 			DailyReminder:  true,
 			Notifications:  true,
 		},
-		AllowedPrivateRepos:   state.PrivateAllowed,
-		MM34646ResetTokenDone: true,
+		AllowedPrivateRepos: state.PrivateAllowed,
 	}
 
 	if err = p.storeGitHubUserInfo(userInfo); err != nil {
@@ -552,7 +551,7 @@ func (p *Plugin) completeConnectUserToGitHub(c *Context, w http.ResponseWriter, 
 	}
 }
 
-func (p *Plugin) getGitHubUser(c *Context, w http.ResponseWriter, r *http.Request) {
+func (p *Plugin) getForgejoUser(c *Context, w http.ResponseWriter, r *http.Request) {
 	type GitHubUserRequest struct {
 		UserID string `json:"user_id"`
 	}

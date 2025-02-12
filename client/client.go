@@ -79,7 +79,7 @@ func (c *Client) GetConfiguration() (*plugin.Configuration, error) {
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, errors.Errorf("Unable to get GitHub config. Error: %v, %v", resp.StatusCode, string(respBody))
+		return nil, errors.Errorf("Unable to get Forgejo config. Error: %v, %v", resp.StatusCode, string(respBody))
 	}
 
 	config := &plugin.Configuration{}
@@ -88,7 +88,7 @@ func (c *Client) GetConfiguration() (*plugin.Configuration, error) {
 	config.ForgejoOAuthClientID = strings.TrimSpace(config.ForgejoOAuthClientID)
 	config.ForgejoOAuthClientSecret = strings.TrimSpace(config.ForgejoOAuthClientSecret)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to decode GitHub config")
+		return nil, errors.Wrap(err, "failed to decode Forgejo config")
 	}
 
 	return config, nil
@@ -116,13 +116,13 @@ func (c *Client) GetToken(userID string) (*oauth2.Token, error) {
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, errors.Errorf("Unable to get GitHub token. Error: %v, %v", resp.StatusCode, string(respBody))
+		return nil, errors.Errorf("Unable to get Forgejo token. Error: %v, %v", resp.StatusCode, string(respBody))
 	}
 
 	token := &oauth2.Token{}
 	err = json.Unmarshal(respBody, token)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to decode GitHub token")
+		return nil, errors.Wrap(err, "failed to decode Forgejo token")
 	}
 
 	return token, nil
