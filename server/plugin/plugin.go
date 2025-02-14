@@ -736,8 +736,7 @@ func (p *Plugin) GetDailySummaryText(userID string) (string, error) {
 }
 
 func (p *Plugin) PostToDo(info *ForgejoUserInfo, userID string) error {
-	ctx := context.Background()
-	text, err := p.GetToDo(ctx, info.ForgejoUsername, p.githubConnectUser(ctx, info))
+	text, err := p.GetToDo(info)
 	if err != nil {
 		return err
 	}
@@ -759,66 +758,57 @@ func (p *Plugin) PostToDo(info *ForgejoUserInfo, userID string) error {
 	return nil
 }
 
-func (p *Plugin) GetToDo(ctx context.Context, username string, githubClient *github.Client) (string, error) {
+func (p *Plugin) GetToDo(info *ForgejoUserInfo) (string, error) {
 	config := p.getConfiguration()
+	orgList := config.getOrganizations()
 	baseURL := config.getBaseURL()
-	orgList := p.configuration.getOrganizations()
-	issueResults, _, err := githubClient.Search.Issues(ctx, getReviewSearchQuery(username, orgList), &github.SearchOptions{})
-	if err != nil {
-		return "", errors.Wrap(err, "Error occurred while searching for reviews")
-	}
 
-	notifications, _, err := githubClient.Activity.ListNotifications(ctx, &github.NotificationListOptions{})
-	if err != nil {
-		return "", errors.Wrap(err, "error occurred while listing notifications")
-	}
+	forgejoClient := p.forgejoConnect(info)
 
-	yourPrs, _, err := githubClient.Search.Issues(ctx, getYourPrsSearchQuery(username, orgList), &github.SearchOptions{})
-	if err != nil {
-		return "", errors.Wrap(err, "error occurred while searching for PRs")
-	}
+	var resultReview, resultAssignee, resultOpenPR []*github.Issue
+	for _, org := range orgList {
+		resultReviewData := makeForgejoRequest[[]FIssue](p, forgejoClient, p.createRequestUrl(baseURL, org, "review_requested"))
+		resultOpenPRData := makeForgejoRequest[[]FIssue](p, forgejoClient, p.createRequestUrl(baseURL, org, "created"))
+		resultAssigneeData := makeForgejoRequest[[]FIssue](p, forgejoClient, p.createRequestUrl(baseURL, org, "assigned"))
 
-	yourAssignments, _, err := githubClient.Search.Issues(ctx, getYourAssigneeSearchQuery(username, orgList), &github.SearchOptions{})
-	if err != nil {
-		return "", errors.Wrap(err, "error occurred while searching for assignments")
+		resultReview = fillGhIssue(resultReviewData, baseURL, resultReview)
+		resultOpenPR = fillGhIssue(resultOpenPRData, baseURL, resultOpenPR)
+		resultAssignee = fillGhIssue(resultAssigneeData, baseURL, resultAssignee)
 	}
+	notifications := makeForgejoRequest[[]FNotification](p, forgejoClient, fmt.Sprintf("%sapi/v1/notifications", baseURL))
 
 	text := "##### Unread Messages\n"
 
 	notificationCount := 0
 	notificationContent := ""
 	for _, n := range notifications {
-		if n.GetReason() == notificationReasonSubscribed {
-			continue
-		}
-
-		if n.GetRepository() == nil {
+		if n.Repository == nil {
 			p.client.Log.Warn("Unable to get repository for notification in todo list. Skipping.")
 			continue
 		}
 
-		if p.checkOrg(n.GetRepository().GetOwner().GetLogin()) != nil {
+		if p.checkOrg(*n.Repository.Owner.Login) != nil {
 			continue
 		}
 
-		notificationSubject := n.GetSubject()
-		notificationType := notificationSubject.GetType()
+		notificationSubject := *n.Subject
+		notificationType := *notificationSubject.Type
 		switch notificationType {
 		case "RepositoryVulnerabilityAlert":
-			message := fmt.Sprintf("[Vulnerability Alert for %v](%v)", n.GetRepository().GetFullName(), fixGithubNotificationSubjectURL(n.GetSubject().GetURL(), ""))
+			message := fmt.Sprintf("[Vulnerability Alert for %v](%v)", n.Repository.FullName, fixGithubNotificationSubjectURL(*n.Subject.URL, ""))
 			notificationContent += fmt.Sprintf("* %v\n", message)
 		default:
-			issueURL := n.GetSubject().GetURL()
+			issueURL := *n.Subject.URL
 			issueNumIndex := strings.LastIndex(issueURL, "/")
 			issueNum := issueURL[issueNumIndex+1:]
-			subjectURL := n.GetSubject().GetURL()
-			if n.GetSubject().GetLatestCommentURL() != "" {
-				subjectURL = n.GetSubject().GetLatestCommentURL()
+			subjectURL := *n.Subject.URL
+			if *n.Subject.LatestCommentURL != "" {
+				subjectURL = *n.Subject.LatestCommentURL
 			}
 
-			notificationTitle := notificationSubject.GetTitle()
+			notificationTitle := *notificationSubject.Title
 			notificationURL := fixGithubNotificationSubjectURL(subjectURL, issueNum)
-			notificationContent += getToDoDisplayText(baseURL, notificationTitle, notificationURL, notificationType, n.GetRepository())
+			notificationContent += getToDoDisplayText(baseURL, notificationTitle, notificationURL, notificationType, n.Repository)
 		}
 
 		notificationCount++
@@ -833,36 +823,36 @@ func (p *Plugin) GetToDo(ctx context.Context, username string, githubClient *git
 
 	text += "##### Review Requests\n"
 
-	if issueResults.GetTotal() == 0 {
+	if len(resultReview) == 0 {
 		text += "You don't have any pull requests awaiting your review.\n"
 	} else {
-		text += fmt.Sprintf("You have %v pull requests awaiting your review:\n", issueResults.GetTotal())
+		text += fmt.Sprintf("You have %v pull requests awaiting your review:\n", len(resultReview))
 
-		for _, pr := range issueResults.Issues {
+		for _, pr := range resultReview {
 			text += getToDoDisplayText(baseURL, pr.GetTitle(), pr.GetHTMLURL(), "", nil)
 		}
 	}
 
 	text += "##### Your Open Pull Requests\n"
 
-	if yourPrs.GetTotal() == 0 {
+	if len(resultOpenPR) == 0 {
 		text += "You don't have any open pull requests.\n"
 	} else {
-		text += fmt.Sprintf("You have %v open pull requests:\n", yourPrs.GetTotal())
+		text += fmt.Sprintf("You have %v open pull requests:\n", len(resultOpenPR))
 
-		for _, pr := range yourPrs.Issues {
+		for _, pr := range resultOpenPR {
 			text += getToDoDisplayText(baseURL, pr.GetTitle(), pr.GetHTMLURL(), "", nil)
 		}
 	}
 
 	text += "##### Your Assignments\n"
 
-	if yourAssignments.GetTotal() == 0 {
+	if len(resultAssignee) == 0 {
 		text += "You don't have any assignments.\n"
 	} else {
-		text += fmt.Sprintf("You have %v assignments:\n", yourAssignments.GetTotal())
+		text += fmt.Sprintf("You have %v assignments:\n", len(resultAssignee))
 
-		for _, assign := range yourAssignments.Issues {
+		for _, assign := range resultAssignee {
 			text += getToDoDisplayText(baseURL, assign.GetTitle(), assign.GetHTMLURL(), "", nil)
 		}
 	}
@@ -870,50 +860,47 @@ func (p *Plugin) GetToDo(ctx context.Context, username string, githubClient *git
 	return text, nil
 }
 
+func makeForgejoRequest[T any](p *Plugin, forgejoClient *http.Client, requestURL string) T {
+	response, err := forgejoClient.Get(requestURL)
+	if err != nil {
+		p.client.Log.Error("Failed Forgejo request", "url", requestURL, "error", "error", err.Error())
+	}
+
+	var result T
+	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+		p.client.Log.Error("Error decoding Plugin JSON body", err.Error())
+	}
+	return result
+}
+
 func (p *Plugin) HasUnreads(info *ForgejoUserInfo) bool {
-	username := info.ForgejoUsername
-	ctx := context.Background()
-	githubClient := p.githubConnectUser(ctx, info)
-	orgList := p.configuration.getOrganizations()
-	query := getReviewSearchQuery(username, orgList)
-	issues, _, err := githubClient.Search.Issues(ctx, query, &github.SearchOptions{})
-	if err != nil {
-		p.client.Log.Warn("Failed to search for review", "query", query, "error", err.Error())
-		return false
-	}
+	config := p.getConfiguration()
+	orgList := config.getOrganizations()
+	baseURL := config.getBaseURL()
 
-	query = getYourPrsSearchQuery(username, orgList)
-	yourPrs, _, err := githubClient.Search.Issues(ctx, query, &github.SearchOptions{})
-	if err != nil {
-		p.client.Log.Warn("Failed to search for PRs", "query", query, "error", "error", err.Error())
-		return false
-	}
+	forgejoClient := p.forgejoConnect(info)
 
-	query = getYourAssigneeSearchQuery(username, orgList)
-	yourAssignments, _, err := githubClient.Search.Issues(ctx, query, &github.SearchOptions{})
-	if err != nil {
-		p.client.Log.Warn("Failed to search for assignments", "query", query, "error", "error", err.Error())
-		return false
+	var resultReview, resultAssignee, resultOpenPR []*github.Issue
+	for _, org := range orgList {
+		resultReviewData := makeForgejoRequest[[]FIssue](p, forgejoClient, p.createRequestUrl(baseURL, org, "review_requested"))
+		resultOpenPRData := makeForgejoRequest[[]FIssue](p, forgejoClient, p.createRequestUrl(baseURL, org, "created"))
+		resultAssigneeData := makeForgejoRequest[[]FIssue](p, forgejoClient, p.createRequestUrl(baseURL, org, "assigned"))
+
+		resultReview = fillGhIssue(resultReviewData, baseURL, resultReview)
+		resultOpenPR = fillGhIssue(resultOpenPRData, baseURL, resultOpenPR)
+		resultAssignee = fillGhIssue(resultAssigneeData, baseURL, resultAssignee)
 	}
 
 	relevantNotifications := false
-	notifications, _, err := githubClient.Activity.ListNotifications(ctx, &github.NotificationListOptions{})
-	if err != nil {
-		p.client.Log.Warn("Failed to list notifications", "error", err.Error())
-		return false
-	}
+	notifications := makeForgejoRequest[[]FNotification](p, forgejoClient, fmt.Sprintf("%sapi/v1/notifications", baseURL))
 
 	for _, n := range notifications {
-		if n.GetReason() == notificationReasonSubscribed {
-			continue
-		}
-
-		if n.GetRepository() == nil {
+		if n.Repository == nil {
 			p.client.Log.Warn("Unable to get repository for notification in todo list. Skipping.")
 			continue
 		}
 
-		if p.checkOrg(n.GetRepository().GetOwner().GetLogin()) != nil {
+		if p.checkOrg(*n.Repository.Owner.Login) != nil {
 			continue
 		}
 
@@ -921,7 +908,7 @@ func (p *Plugin) HasUnreads(info *ForgejoUserInfo) bool {
 		break
 	}
 
-	if issues.GetTotal() == 0 && !relevantNotifications && yourPrs.GetTotal() == 0 && yourAssignments.GetTotal() == 0 {
+	if len(resultReview) == 0 && !relevantNotifications && len(resultOpenPR) == 0 && len(resultAssignee) == 0 {
 		return false
 	}
 

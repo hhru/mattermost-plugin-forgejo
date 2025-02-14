@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/google/go-github/v54/github"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/mattermost/mattermost/server/public/model"
@@ -222,7 +221,7 @@ func TestGetToDoDisplayText(t *testing.T) {
 		title      string
 		url        string
 		notifType  string
-		repository *github.Repository
+		repository *FRepository
 	}
 	tcs := []struct {
 		name string
@@ -255,9 +254,9 @@ func TestGetToDoDisplayText(t *testing.T) {
 				"Test discussion title!",
 				"",
 				"Discussion",
-				&github.Repository{
+				&FRepository{
 					HTMLURL: model.NewString("https://github.com/mattermost/mattermost-plugin-github"),
-					Owner: &github.User{
+					Owner: &FUser{
 						Login: model.NewString("mattermost"),
 					},
 					Name: model.NewString("mattermost-plugin-github"),

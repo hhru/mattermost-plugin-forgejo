@@ -59,7 +59,7 @@ type PRDetails struct {
 }
 
 type FilteredNotification struct {
-	github.Notification
+	FNotification
 	HTMLURL string `json:"html_url"`
 }
 
@@ -97,20 +97,43 @@ const (
 	ResponseTypePlain ResponseType = "TEXT_RESPONSE"
 )
 
-type FRepository struct {
+type FRepositoryMeta struct {
 	FullName *string `json:"full_name,omitempty"`
 }
 
+type FRepository struct {
+	FullName *string `json:"full_name,omitempty"`
+	Owner    *FUser  `json:"owner,omitempty"`
+	HTMLURL  *string `json:"html_url,omitempty"`
+	Name     *string `json:"name,omitempty"`
+}
+
+type FNotification struct {
+	ID         *int                  `json:"id,omitempty"`
+	Repository *FRepository          `json:"repository,omitempty"`
+	Subject    *FNotificationSubject `json:"subject,omitempty"`
+	Unread     *bool                 `json:"unread,omitempty"`
+	UpdatedAt  *FTimestamp           `json:"updated_at,omitempty"`
+	URL        *string               `json:"url,omitempty"`
+}
+
+type FNotificationSubject struct {
+	Title            *string `json:"title,omitempty"`
+	URL              *string `json:"url,omitempty"`
+	LatestCommentURL *string `json:"latest_comment_url,omitempty"`
+	Type             *string `json:"type,omitempty"`
+}
+
 type FIssue struct {
-	Number     *int         `json:"number,omitempty"`
-	Repository *FRepository `json:"repository,omitempty"`
-	Title      *string      `json:"title,omitempty"`
-	CreatedAt  *FTimestamp  `json:"created_at,omitempty"`
-	UpdatedAt  *FTimestamp  `json:"updated_at,omitempty"`
-	User       *FUser       `json:"user,omitempty"`
-	Milestone  *FMilestone  `json:"milestone,omitempty"`
-	HTMLURL    *string      `json:"html_url,omitempty"`
-	Labels     []*FLabel    `json:"labels,omitempty"`
+	Number     *int             `json:"number,omitempty"`
+	Repository *FRepositoryMeta `json:"repository,omitempty"`
+	Title      *string          `json:"title,omitempty"`
+	CreatedAt  *FTimestamp      `json:"created_at,omitempty"`
+	UpdatedAt  *FTimestamp      `json:"updated_at,omitempty"`
+	User       *FUser           `json:"user,omitempty"`
+	Milestone  *FMilestone      `json:"milestone,omitempty"`
+	HTMLURL    *string          `json:"html_url,omitempty"`
+	Labels     []*FLabel        `json:"labels,omitempty"`
 }
 
 type FTimestamp struct {
@@ -249,7 +272,7 @@ func (p *Plugin) checkAuth(handler http.HandlerFunc, responseType ResponseType) 
 func (p *Plugin) createContext(_ http.ResponseWriter, r *http.Request) (*Context, context.CancelFunc) {
 	userID := r.Header.Get("Mattermost-User-ID")
 
-	logger := logger.New(p.API).With(logger.LogContext{
+	log := logger.New(p.API).With(logger.LogContext{
 		"userid": userID,
 	})
 
@@ -258,7 +281,7 @@ func (p *Plugin) createContext(_ http.ResponseWriter, r *http.Request) (*Context
 	context := &Context{
 		Ctx:    ctx,
 		UserID: userID,
-		Log:    logger,
+		Log:    log,
 	}
 
 	return context, cancel
@@ -691,50 +714,44 @@ func (p *Plugin) getConnected(c *Context, w http.ResponseWriter, r *http.Request
 }
 
 func (p *Plugin) getMentions(c *UserContext, w http.ResponseWriter, r *http.Request) {
-	githubClient := p.githubConnectUser(c.Context.Ctx, c.GHInfo)
-	username := c.GHInfo.ForgejoUsername
-	orgList := p.configuration.getOrganizations()
-	query := getMentionSearchQuery(username, orgList)
+	config := p.getConfiguration()
+	orgList := config.getOrganizations()
+	baseURL := config.getBaseURL()
 
-	result, _, err := githubClient.Search.Issues(c.Ctx, query, &github.SearchOptions{})
-	if err != nil {
-		p.writeAPIError(w, &APIErrorResponse{Message: "failed to search for issues", StatusCode: http.StatusInternalServerError})
-		c.Log.WithError(err).With(logger.LogContext{"query": query}).Warnf("Failed to search for issues")
-		return
+	forgejoClient := p.forgejoConnect(c.GHInfo)
+
+	var result []*github.Issue
+	for _, org := range orgList {
+		resultData := getRequestResponse(c, forgejoClient, p.createRequestUrl(baseURL, org, "mentioned"))
+		result = fillGhIssue(resultData, baseURL, result)
 	}
-
-	p.writeJSON(w, result.Issues)
+	p.writeJSON(w, result)
 }
 
 func (p *Plugin) getUnreadsData(c *UserContext) []*FilteredNotification {
-	githubClient := p.githubConnectUser(c.Context.Ctx, c.GHInfo)
-	notifications, _, err := githubClient.Activity.ListNotifications(c.Ctx, &github.NotificationListOptions{})
+	config := p.getConfiguration()
+	baseURL := config.getBaseURL()
+
+	forgejoClient := p.forgejoConnect(c.GHInfo)
+	notifications := makeForgejoRequest[[]FNotification](p, forgejoClient, fmt.Sprintf("%sapi/v1/notifications", baseURL))
 	var filteredNotifications []*FilteredNotification
-	if err != nil {
-		c.Log.WithError(err).Warnf("Failed to list notifications")
-		return filteredNotifications
-	}
 
 	for _, n := range notifications {
-		if n.GetReason() == notificationReasonSubscribed {
+		if p.checkOrg(*n.Repository.Owner.Login) != nil {
 			continue
 		}
 
-		if p.checkOrg(n.GetRepository().GetOwner().GetLogin()) != nil {
-			continue
-		}
-
-		issueURL := n.GetSubject().GetURL()
+		issueURL := *n.Subject.URL
 		issueNumIndex := strings.LastIndex(issueURL, "/")
 		issueNum := issueURL[issueNumIndex+1:]
-		subjectURL := n.GetSubject().GetURL()
-		if n.GetSubject().GetLatestCommentURL() != "" {
-			subjectURL = n.GetSubject().GetLatestCommentURL()
+		subjectURL := *n.Subject.URL
+		if *n.Subject.LatestCommentURL != "" {
+			subjectURL = *n.Subject.LatestCommentURL
 		}
 
 		filteredNotifications = append(filteredNotifications, &FilteredNotification{
-			Notification: *n,
-			HTMLURL:      fixGithubNotificationSubjectURL(subjectURL, issueNum),
+			FNotification: n,
+			HTMLURL:       fixGithubNotificationSubjectURL(subjectURL, issueNum),
 		})
 	}
 
@@ -847,24 +864,21 @@ func getRepoOwnerAndNameFromURL(url string) (string, string) {
 }
 
 func (p *Plugin) searchIssues(c *UserContext, w http.ResponseWriter, r *http.Request) {
-	githubClient := p.githubConnectUser(c.Context.Ctx, c.GHInfo)
+	config := p.getConfiguration()
+	orgList := config.getOrganizations()
+	baseURL := config.getBaseURL()
+
+	forgejoClient := p.forgejoConnect(c.GHInfo)
 
 	searchTerm := r.FormValue("term")
-	orgsList := p.configuration.getOrganizations()
-	allIssues := []*github.Issue{}
-	for _, org := range orgsList {
-		query := getIssuesSearchQuery(org, searchTerm)
-		result, _, err := githubClient.Search.Issues(c.Ctx, query, &github.SearchOptions{})
-		if err != nil {
-			c.Log.WithError(err).With(logger.LogContext{"query": query}).Warnf("Failed to search for issues")
-			p.writeJSON(w, make([]*github.Issue, 0))
-			return
-		}
-
-		allIssues = append(allIssues, result.Issues...)
+	result := []*github.Issue{}
+	for _, org := range orgList {
+		query := fmt.Sprintf("%sapi/v1/repos/issues/search?owner=%s&q=%s&type=pulls&limit=100", baseURL, org, searchTerm)
+		resultData := getRequestResponse(c, forgejoClient, query)
+		result = fillGhIssue(resultData, baseURL, result)
 	}
 
-	p.writeJSON(w, allIssues)
+	p.writeJSON(w, result)
 }
 
 func (p *Plugin) getPermaLink(postID string) (string, error) {
@@ -1041,7 +1055,7 @@ func getRequestResponse(c *UserContext, forgejoClient *http.Client, requestURL s
 
 	var result []FIssue
 	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
-		c.Log.WithError(err).Warnf("Error decoding settings from JSON body")
+		c.Log.WithError(err).Warnf("Error decoding FIssue - '%s' JSON body", requestURL)
 		return nil
 	}
 	return result
@@ -1117,10 +1131,7 @@ func (p *Plugin) getSidebarContent(c *UserContext, w http.ResponseWriter, r *htt
 }
 
 func (p *Plugin) postToDo(c *UserContext, w http.ResponseWriter, r *http.Request) {
-	githubClient := p.githubConnectUser(c.Context.Ctx, c.GHInfo)
-	username := c.GHInfo.ForgejoUsername
-
-	text, err := p.GetToDo(c.Ctx, username, githubClient)
+	text, err := p.GetToDo(c.GHInfo)
 	if err != nil {
 		c.Log.WithError(err).Warnf("Failed to get Todos")
 		p.writeAPIError(w, &APIErrorResponse{ID: "", Message: "Encountered an error getting the to do items.", StatusCode: http.StatusUnauthorized})

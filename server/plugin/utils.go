@@ -17,46 +17,8 @@ import (
 
 	"github.com/mattermost/mattermost/server/public/pluginapi"
 
-	"github.com/google/go-github/v54/github"
 	"github.com/pkg/errors"
 )
-
-func getMentionSearchQuery(username string, orgs []string) string {
-	return buildSearchQuery("is:open mentions:%v archived:false %v", username, orgs)
-}
-
-func getReviewSearchQuery(username string, orgs []string) string {
-	return buildSearchQuery("is:pr is:open review-requested:%v archived:false %v", username, orgs)
-}
-
-func getYourPrsSearchQuery(username string, orgs []string) string {
-	return buildSearchQuery("is:pr is:open author:%v archived:false %v", username, orgs)
-}
-
-func getYourAssigneeSearchQuery(username string, orgs []string) string {
-	return buildSearchQuery("is:open assignee:%v archived:false %v", username, orgs)
-}
-
-func getIssuesSearchQuery(org, searchTerm string) string {
-	query := "is:open is:issue archived:false %v %v"
-	orgField := ""
-	if len(org) != 0 {
-		orgField = fmt.Sprintf("org:%v", org)
-	}
-
-	return fmt.Sprintf(query, orgField, searchTerm)
-}
-
-func buildSearchQuery(query, username string, orgs []string) string {
-	orgField := ""
-	for _, org := range orgs {
-		if len(org) != 0 {
-			orgField = fmt.Sprintf("%s org:%s", orgField, org)
-		}
-	}
-
-	return fmt.Sprintf(query, username, orgField)
-}
 
 func pad(src []byte) []byte {
 	padding := aes.BlockSize - len(src)%aes.BlockSize
@@ -321,15 +283,15 @@ func getCodeMarkdown(user, repo, repoPath, word, lines string, isTruncated bool)
 }
 
 // getToDoDisplayText returns the text to be displayed in todo listings.
-func getToDoDisplayText(baseURL, title, url, notifType string, repository *github.Repository) string {
+func getToDoDisplayText(baseURL, title, url, notifType string, repository *FRepository) string {
 	var owner, repo, repoURL, titlePart string
 	if repository == nil {
 		owner, repo = parseOwnerAndRepo(url, baseURL)
 		repoURL = fmt.Sprintf("%s%s/%s", baseURL, owner, repo)
 	} else {
-		owner = repository.GetOwner().GetLogin()
-		repo = repository.GetName()
-		repoURL = repository.GetHTMLURL()
+		owner = *repository.Owner.Login
+		repo = *repository.Name
+		repoURL = *repository.HTMLURL
 	}
 
 	repoWords := strings.Split(repo, "-")

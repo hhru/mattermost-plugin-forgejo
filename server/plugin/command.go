@@ -595,9 +595,7 @@ func (p *Plugin) handleDisconnect(_ *plugin.Context, args *model.CommandArgs, _ 
 }
 
 func (p *Plugin) handleTodo(_ *plugin.Context, _ *model.CommandArgs, _ []string, userInfo *ForgejoUserInfo) string {
-	githubClient := p.githubConnectUser(context.Background(), userInfo)
-
-	text, err := p.GetToDo(context.Background(), userInfo.ForgejoUsername, githubClient)
+	text, err := p.GetToDo(userInfo)
 	if err != nil {
 		p.client.Log.Warn("Failed get get Todos", "error", err.Error())
 		return "Encountered an error getting your to do items."
