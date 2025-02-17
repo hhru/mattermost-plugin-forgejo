@@ -156,9 +156,9 @@ func (s *Subscription) RenderStyle() string {
 	return s.Flags.RenderStyle
 }
 
-func (s *Subscription) excludedRepoForSub(repo *github.Repository) bool {
+func (s *Subscription) excludedRepoForSub(repoFullName string) bool {
 	for _, repository := range s.Flags.ExcludeRepository {
-		if repository == repo.GetFullName() {
+		if repository == repoFullName {
 			return true
 		}
 	}
@@ -314,9 +314,8 @@ func (p *Plugin) StoreSubscriptions(s *Subscriptions) error {
 	return nil
 }
 
-func (p *Plugin) GetSubscribedChannelsForRepository(repo *github.Repository) []*Subscription {
-	name := repo.GetFullName()
-	name = strings.ToLower(name)
+func (p *Plugin) GetSubscribedChannelsForRepository(repoFullName string, repoIsPrivate bool) []*Subscription {
+	name := strings.ToLower(repoFullName)
 	org := strings.Split(name, "/")[0]
 	subs, err := p.GetSubscriptions()
 	if err != nil {
@@ -324,7 +323,7 @@ func (p *Plugin) GetSubscribedChannelsForRepository(repo *github.Repository) []*
 	}
 
 	// Add subscriptions for the specific repo
-	subsForRepo := []*Subscription{}
+	var subsForRepo []*Subscription
 	if subs.Repositories[name] != nil {
 		subsForRepo = append(subsForRepo, subs.Repositories[name]...)
 	}
@@ -339,13 +338,13 @@ func (p *Plugin) GetSubscribedChannelsForRepository(repo *github.Repository) []*
 		return nil
 	}
 
-	subsToReturn := []*Subscription{}
+	var subsToReturn []*Subscription
 
 	for _, sub := range subsForRepo {
-		if repo.GetPrivate() && !p.permissionToRepo(sub.CreatorID, name) {
+		if repoIsPrivate && !p.permissionToRepo(sub.CreatorID, name) {
 			continue
 		}
-		if sub.excludedRepoForSub(repo) {
+		if sub.excludedRepoForSub(repoFullName) {
 			continue
 		}
 		subsToReturn = append(subsToReturn, sub)

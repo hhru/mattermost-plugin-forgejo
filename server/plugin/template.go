@@ -124,9 +124,20 @@ func init() {
 {{- end -}}
 	`))
 
+	template.Must(masterTemplate.New("FUser").Parse(`
+{{- $mattermostUsername := .Login | lookupMattermostUsername}}
+{{- if $mattermostUsername }}@{{$mattermostUsername}}
+{{- else}}[{{.GetLogin}}]({{.HTMLURL}})
+{{- end -}}
+	`))
+
 	// The repo template links to the corresponding repository.
 	template.Must(masterTemplate.New("repo").Parse(
 		`[\[{{.GetFullName}}\]]({{.GetHTMLURL}})`,
+	))
+
+	template.Must(masterTemplate.New("FRepo").Parse(
+		`[\[{{.FullName}}\]]({{.HTMLURL}})`,
 	))
 
 	// The eventRepoPullRequest links to the corresponding pull request, anchored at the repo.
@@ -158,6 +169,10 @@ func init() {
 		`[#{{.GetNumber}} {{.GetTitle}}]({{.GetHTMLURL}})`,
 	))
 
+	template.Must(masterTemplate.New("FIssue").Parse(
+		`[#{{.Number}} {{.Title}}]({{.HTMLURL}})`,
+	))
+
 	// The release links to the corresponding release.
 	template.Must(masterTemplate.New("release").Parse(
 		`[{{.GetTagName}}]({{.GetHTMLURL}})`,
@@ -177,13 +192,13 @@ func init() {
 	// issue *is* a pull request, and so we still use .GetIssue and this template accordingly.
 	// and .GetComment return full link to the comment as long as comment object is present in the payload
 	template.Must(masterTemplate.New("eventRepoIssueFullLink").Parse(
-		`[{{.GetRepo.GetFullName}}#{{.GetIssue.GetNumber}}]({{.GetComment.GetHTMLURL}})`,
+		`[{{.Repo.FullName}}#{{.Issue.Number}}]({{.Comment.HTMLURL}})`,
 	))
 
 	// eventRepoIssueFullLinkWithTitle template is sibling of eventRepoIssueWithTitle
 	// this one refers to the comment instead of the issue itself
 	template.Must(masterTemplate.New("eventRepoIssueFullLinkWithTitle").Parse(
-		`{{template "eventRepoIssueFullLink" .}} - {{.GetIssue.GetTitle}}`,
+		`{{template "eventRepoIssueFullLink" .}} - {{.Issue.Title}}`,
 	))
 
 	template.Must(masterTemplate.New("labels").Funcs(funcMap).Parse(`
@@ -301,9 +316,9 @@ Assignees: {{range $i, $el := .Assignees -}} {{- if $i}}, {{end}}{{template "use
 `))
 
 	template.Must(masterTemplate.New("issueComment").Funcs(funcMap).Parse(`
-{{template "repo" .GetRepo}} New comment by {{template "user" .GetSender}} on {{template "issue" .Issue}}:
+{{template "FRepo" .Repo}} New comment by {{template "FUser" .Sender}} on {{template "FIssue" .Issue}}:
 
-{{.GetComment.GetBody | trimBody | replaceAllForgejoUsernames}}
+{{.Comment.Body | trimBody | replaceAllForgejoUsernames}}
 `))
 
 	template.Must(masterTemplate.New("pullRequestReviewEvent").Funcs(funcMap).Parse(`
@@ -323,38 +338,38 @@ Assignees: {{range $i, $el := .Assignees -}} {{- if $i}}, {{end}}{{template "use
 `))
 
 	template.Must(masterTemplate.New("commentMentionNotification").Funcs(funcMap).Parse(`
-{{template "user" .GetSender}} mentioned you on [{{.GetRepo.GetFullName}}#{{.Issue.GetNumber}}]({{.GetComment.GetHTMLURL}}) - {{.Issue.GetTitle}}:
-{{.GetComment.GetBody | trimBody | quote | replaceAllForgejoUsernames}}
+{{template "FUser" .Sender}} mentioned you on [{{.Repo.FullName}}#{{.Issue.Number}}]({{.Comment.HTMLURL}}) - {{.Issue.Title}}:
+{{.Comment.Body | trimBody | quote | replaceAllForgejoUsernames}}
 `))
 
 	template.Must(masterTemplate.New("commentAuthorPullRequestNotification").Funcs(funcMap).Parse(`
-{{template "user" .GetSender}} commented on your pull request {{template "eventRepoIssueFullLinkWithTitle" .}}:
-{{.GetComment.GetBody | trimBody | quote | replaceAllForgejoUsernames}}
+{{template "FUser" .Sender}} commented on your pull request {{template "eventRepoIssueFullLinkWithTitle" .}}:
+{{.Comment.Body | trimBody | quote | replaceAllForgejoUsernames}}
 `))
 
 	template.Must(masterTemplate.New("commentAssigneePullRequestNotification").Funcs(funcMap).Parse(`
-{{template "user" .GetSender}} commented on pull request you are assigned to {{template "eventRepoIssueFullLinkWithTitle" .}}:
-{{.GetComment.GetBody | trimBody | quote | replaceAllForgejoUsernames}}
+{{template "FUser" .GetSender}} commented on pull request you are assigned to {{template "eventRepoIssueFullLinkWithTitle" .}}:
+{{.Comment.Body | trimBody | quote | replaceAllForgejoUsernames}}
 `))
 
 	template.Must(masterTemplate.New("commentAssigneeIssueNotification").Funcs(funcMap).Parse(`
-{{template "user" .GetSender}} commented on an issue you are assigned to {{template "eventRepoIssueFullLinkWithTitle" .}}:
-{{.GetComment.GetBody | trimBody | quote | replaceAllForgejoUsernames}}
+{{template "FUser" .Sender}} commented on an issue you are assigned to {{template "eventRepoIssueFullLinkWithTitle" .}}:
+{{.Comment.Body | trimBody | quote | replaceAllForgejoUsernames}}
 `))
 
 	template.Must(masterTemplate.New("commentAssigneeSelfMentionPullRequestNotification").Funcs(funcMap).Parse(`
-{{template "user" .GetSender}} mentioned you on a pull request that you are assigned to {{template "eventRepoIssueFullLinkWithTitle" .}}:
-{{.GetComment.GetBody | trimBody | quote | replaceAllForgejoUsernames}}
+{{template "FUser" .Sender}} mentioned you on a pull request that you are assigned to {{template "eventRepoIssueFullLinkWithTitle" .}}:
+{{.Comment.Body | trimBody | quote | replaceAllForgejoUsernames}}
 `))
 
 	template.Must(masterTemplate.New("commentAssigneeSelfMentionIssueNotification").Funcs(funcMap).Parse(`
-{{template "user" .GetSender}} mentioned you on an issue that you are assigned to {{template "eventRepoIssueFullLinkWithTitle" .}}:
-{{.GetComment.GetBody | trimBody | quote | replaceAllForgejoUsernames}}
+{{template "FUser" .Sender}} mentioned you on an issue that you are assigned to {{template "eventRepoIssueFullLinkWithTitle" .}}:
+{{.Comment.Body | trimBody | quote | replaceAllForgejoUsernames}}
 `))
 
 	template.Must(masterTemplate.New("commentAuthorIssueNotification").Funcs(funcMap).Parse(`
-{{template "user" .GetSender}} commented on your issue {{template "eventRepoIssueFullLinkWithTitle" .}}:
-{{.GetComment.GetBody | trimBody | quote | replaceAllForgejoUsernames}}
+{{template "FUser" .Sender}} commented on your issue {{template "eventRepoIssueFullLinkWithTitle" .}}:
+{{.Comment.Body | trimBody | quote | replaceAllForgejoUsernames}}
 `))
 
 	template.Must(masterTemplate.New("pullRequestNotification").Funcs(funcMap).Parse(`

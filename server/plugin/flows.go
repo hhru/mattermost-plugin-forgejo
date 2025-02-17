@@ -145,7 +145,7 @@ func (fm *FlowManager) onDone(f *flow.Flow) {
 }
 
 func (fm *FlowManager) newFlow(name flow.Name) (*flow.Flow, error) {
-	flow, err := flow.NewFlow(
+	newFlow, err := flow.NewFlow(
 		name,
 		fm.client,
 		fm.pluginID,
@@ -155,9 +155,9 @@ func (fm *FlowManager) newFlow(name flow.Name) (*flow.Flow, error) {
 		return nil, errors.Wrapf(err, "failed to create flow %s", name)
 	}
 
-	flow.InitHTTP(fm.router)
+	newFlow.InitHTTP(fm.router)
 
-	return flow, nil
+	return newFlow, nil
 }
 
 const (
@@ -801,7 +801,7 @@ func (fm *FlowManager) trackCompletAnnouncementWizard(userID string) {
 func (fm *FlowManager) stepAnnouncementQuestion() flow.Step {
 	defaultMessage := "Hi team,\n" +
 		"\n" +
-		"We've set up the Mattermost Forgejo plugin to enable notifications from Forgejo in Mattermost. To get started, run the `/forgejo connect` slash command from any channel within Mattermost to connect that channel with GitHub. See the [documentation](https://github.com/mattermost/mattermost-plugin-github/blob/master/README.md#slash-commands) for details on using the GitHub plugin."
+		"We've set up the Mattermost Forgejo plugin to enable notifications from Forgejo in Mattermost. To get started, run the `/forgejo connect` slash command from any channel within Mattermost to connect that channel with Forgejo. See the [documentation](https://github.com/hhru/mattermost-plugin-forgejo/blob/master/README.md#slash-commands) for details on using the Forgejo plugin."
 
 	return flow.NewStep(stepAnnouncementQuestion).
 		WithText("Want to let your team know?").

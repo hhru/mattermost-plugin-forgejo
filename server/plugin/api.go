@@ -106,6 +106,7 @@ type FRepository struct {
 	Owner    *FUser  `json:"owner,omitempty"`
 	HTMLURL  *string `json:"html_url,omitempty"`
 	Name     *string `json:"name,omitempty"`
+	Private  *bool   `json:"private,omitempty"`
 }
 
 type FNotification struct {
@@ -131,9 +132,24 @@ type FIssue struct {
 	CreatedAt  *FTimestamp      `json:"created_at,omitempty"`
 	UpdatedAt  *FTimestamp      `json:"updated_at,omitempty"`
 	User       *FUser           `json:"user,omitempty"`
+	Assignees  []*FUser         `json:"assignees,omitempty"`
 	Milestone  *FMilestone      `json:"milestone,omitempty"`
 	HTMLURL    *string          `json:"html_url,omitempty"`
 	Labels     []*FLabel        `json:"labels,omitempty"`
+}
+
+type FIssueCommentEvent struct {
+	Action  *string        `json:"action,omitempty"`
+	Repo    *FRepository   `json:"repository,omitempty"`
+	Issue   *FIssue        `json:"issue,omitempty"`
+	Comment *FIssueComment `json:"comment,omitempty"`
+	Sender  *FUser         `json:"sender,omitempty"`
+}
+
+type FIssueComment struct {
+	ID      *int    `json:"id,omitempty"`
+	Body    *string `json:"body,omitempty"`
+	HTMLURL *string `json:"html_url,omitempty"`
 }
 
 type FTimestamp struct {
@@ -141,7 +157,8 @@ type FTimestamp struct {
 }
 
 type FUser struct {
-	Login *string `json:"login,omitempty"`
+	Login   *string `json:"login,omitempty"`
+	HTMLURL *string `json:"html_url,omitempty"`
 }
 
 type FMilestone struct {
@@ -366,7 +383,7 @@ func (p *Plugin) connectUserToForgejo(c *Context, w http.ResponseWriter, r *http
 		return
 	}
 
-	url := conf.AuthCodeURL(state.Token, oauth2.AccessTypeOnline)
+	codeURL := conf.AuthCodeURL(state.Token, oauth2.AccessTypeOnline)
 
 	ch := p.oauthBroker.SubscribeOAuthComplete(c.UserID)
 
@@ -397,7 +414,7 @@ func (p *Plugin) connectUserToForgejo(c *Context, w http.ResponseWriter, r *http
 		p.oauthBroker.UnsubscribeOAuthComplete(c.UserID, ch)
 	}()
 
-	http.Redirect(w, r, url, http.StatusFound)
+	http.Redirect(w, r, codeURL, http.StatusFound)
 }
 
 func (p *Plugin) completeConnectUserToForgejo(c *Context, w http.ResponseWriter, r *http.Request) {
@@ -492,15 +509,15 @@ func (p *Plugin) completeConnectUserToForgejo(c *Context, w http.ResponseWriter,
 		c.Log.WithError(err).Warnf("Failed to store Forgejo user info mapping")
 	}
 
-	flow := p.flowManager.setupFlow.ForUser(c.UserID)
+	flowClone := p.flowManager.setupFlow.ForUser(c.UserID)
 
-	stepName, err := flow.GetCurrentStep()
+	stepName, err := flowClone.GetCurrentStep()
 	if err != nil {
 		c.Log.WithError(err).Warnf("Failed to get current step")
 	}
 
 	if stepName == stepOAuthConnect {
-		err = flow.Go(stepWebhookQuestion)
+		err = flowClone.Go(stepWebhookQuestion)
 		if err != nil {
 			c.Log.WithError(err).Warnf("Failed go to next step")
 		}

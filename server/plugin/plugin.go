@@ -44,8 +44,7 @@ const (
 	settingOff           = "off"
 	settingOnChange      = "on-change"
 
-	notificationReasonSubscribed = "subscribed"
-	dailySummary                 = "_dailySummary"
+	dailySummary = "_dailySummary"
 )
 
 var (
@@ -932,14 +931,14 @@ func (p *Plugin) checkOrg(org string) error {
 	return errors.Errorf("only repositories in the %v organization(s) are supported", config.ForgejoOrg)
 }
 
-func (p *Plugin) isUserOrganizationMember(githubClient *github.Client, user *github.User, organization string) bool {
+func (p *Plugin) isUserOrganizationMember(githubClient *github.Client, username string, organization string) bool {
 	if organization == "" {
 		return false
 	}
 
-	isMember, _, err := githubClient.Organizations.IsMember(context.Background(), organization, *user.Login)
+	isMember, _, err := githubClient.Organizations.IsMember(context.Background(), organization, username)
 	if err != nil {
-		p.client.Log.Warn("Failled to check if user is org member", "Forgejo username", *user.Login, "error", err.Error())
+		p.client.Log.Warn("Failed to check if user is org member", "Forgejo username", username, "error", err.Error())
 		return false
 	}
 

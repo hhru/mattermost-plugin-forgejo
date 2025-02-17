@@ -9,6 +9,7 @@ import (
 	"html"
 	"io"
 	"net/http"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -40,10 +41,17 @@ const (
 	forgejoObjectTypeIssueComment      = "issue_comment"
 	forgejoObjectTypePRReviewComment   = "pr_review_comment"
 	forgejoObjectTypeDiscussionComment = "discussion_comment"
+	forgejoEventTypeHeader             = "X-Forgejo-Event"
+)
+
+var (
+	eventTypeMapping = map[string]interface{}{
+		"issue_comment": &FIssueCommentEvent{},
+	}
 )
 
 // RenderConfig holds various configuration options to be used in a template
-// for redering an event.
+// for rendering an event.
 type RenderConfig struct {
 	Style string
 }
@@ -205,7 +213,17 @@ func (p *Plugin) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	event, err := github.ParseWebHook(github.WebHookType(r), body)
+	eventType, ok := eventTypeMapping[r.Header.Get(forgejoEventTypeHeader)]
+	event := reflect.New(reflect.TypeOf(eventType).Elem()).Interface()
+	if ok {
+		r := json.Unmarshal(body, &event)
+		err = r
+	} else {
+		e, r := github.ParseWebHook(github.WebHookType(r), body)
+		event = e
+		err = r
+	}
+
 	if err != nil {
 		p.client.Log.Debug("Forgejo webhook content type should be set to \"application/json\"", "error", err.Error())
 		http.Error(w, "wrong mime-type. should be \"application/json\"", http.StatusBadRequest)
@@ -243,8 +261,10 @@ func (p *Plugin) handleWebhook(w http.ResponseWriter, r *http.Request) {
 			p.postIssueEvent(event)
 			p.handleIssueNotification(event)
 		}
-	case *github.IssueCommentEvent:
-		repo = event.GetRepo()
+	case *FIssueCommentEvent:
+		repo = &github.Repository{
+			Private: event.Repo.Private,
+		}
 		handler = func() {
 			p.postIssueCommentEvent(event)
 			p.handleCommentMentionNotification(event)
@@ -344,7 +364,7 @@ func (p *Plugin) permissionToRepo(userID string, ownerAndRepo string) bool {
 	return true
 }
 
-func (p *Plugin) excludeConfigOrgMember(user *github.User, subscription *Subscription) bool {
+func (p *Plugin) excludeConfigOrgMember(username string, subscription *Subscription) bool {
 	if !subscription.ExcludeOrgMembers() {
 		return false
 	}
@@ -358,13 +378,13 @@ func (p *Plugin) excludeConfigOrgMember(user *github.User, subscription *Subscri
 	githubClient := p.githubConnectUser(context.Background(), info)
 	organization := p.getConfiguration().ForgejoOrg
 
-	return p.isUserOrganizationMember(githubClient, user, organization)
+	return p.isUserOrganizationMember(githubClient, username, organization)
 }
 
 func (p *Plugin) postPullRequestEvent(event *github.PullRequestEvent) {
 	repo := event.GetRepo()
 
-	subs := p.GetSubscribedChannelsForRepository(repo)
+	subs := p.GetSubscribedChannelsForRepository(repo.GetFullName(), repo.GetPrivate())
 	if len(subs) == 0 {
 		return
 	}
@@ -407,7 +427,7 @@ func (p *Plugin) postPullRequestEvent(event *github.PullRequestEvent) {
 			continue
 		}
 
-		if p.excludeConfigOrgMember(event.GetSender(), sub) {
+		if p.excludeConfigOrgMember(event.GetSender().GetLogin(), sub) {
 			continue
 		}
 
@@ -564,7 +584,7 @@ func (p *Plugin) postIssueEvent(event *github.IssuesEvent) {
 		return
 	}
 
-	subscribedChannels := p.GetSubscribedChannelsForRepository(repo)
+	subscribedChannels := p.GetSubscribedChannelsForRepository(repo.GetFullName(), repo.GetPrivate())
 	if len(subscribedChannels) == 0 {
 		return
 	}
@@ -602,7 +622,7 @@ func (p *Plugin) postIssueEvent(event *github.IssuesEvent) {
 			continue
 		}
 
-		if p.excludeConfigOrgMember(event.GetSender(), sub) {
+		if p.excludeConfigOrgMember(event.GetSender().GetLogin(), sub) {
 			continue
 		}
 
@@ -651,7 +671,8 @@ func (p *Plugin) postIssueEvent(event *github.IssuesEvent) {
 func (p *Plugin) postPushEvent(event *github.PushEvent) {
 	repo := event.GetRepo()
 
-	subs := p.GetSubscribedChannelsForRepository(ConvertPushEventRepositoryToRepository(repo))
+	repository := ConvertPushEventRepositoryToRepository(repo)
+	subs := p.GetSubscribedChannelsForRepository(repository.GetFullName(), repository.GetPrivate())
 
 	if len(subs) == 0 {
 		return
@@ -674,7 +695,7 @@ func (p *Plugin) postPushEvent(event *github.PushEvent) {
 			continue
 		}
 
-		if p.excludeConfigOrgMember(event.GetSender(), sub) {
+		if p.excludeConfigOrgMember(event.GetSender().GetLogin(), sub) {
 			continue
 		}
 
@@ -690,7 +711,7 @@ func (p *Plugin) postPushEvent(event *github.PushEvent) {
 func (p *Plugin) postCreateEvent(event *github.CreateEvent) {
 	repo := event.GetRepo()
 
-	subs := p.GetSubscribedChannelsForRepository(repo)
+	subs := p.GetSubscribedChannelsForRepository(repo.GetFullName(), repo.GetPrivate())
 	if len(subs) == 0 {
 		return
 	}
@@ -711,7 +732,7 @@ func (p *Plugin) postCreateEvent(event *github.CreateEvent) {
 			continue
 		}
 
-		if p.excludeConfigOrgMember(event.GetSender(), sub) {
+		if p.excludeConfigOrgMember(event.GetSender().GetLogin(), sub) {
 			continue
 		}
 
@@ -727,7 +748,7 @@ func (p *Plugin) postCreateEvent(event *github.CreateEvent) {
 func (p *Plugin) postDeleteEvent(event *github.DeleteEvent) {
 	repo := event.GetRepo()
 
-	subs := p.GetSubscribedChannelsForRepository(repo)
+	subs := p.GetSubscribedChannelsForRepository(repo.GetFullName(), repo.GetPrivate())
 
 	if len(subs) == 0 {
 		return
@@ -750,7 +771,7 @@ func (p *Plugin) postDeleteEvent(event *github.DeleteEvent) {
 			continue
 		}
 
-		if p.excludeConfigOrgMember(event.GetSender(), sub) {
+		if p.excludeConfigOrgMember(event.GetSender().GetLogin(), sub) {
 			continue
 		}
 
@@ -762,16 +783,16 @@ func (p *Plugin) postDeleteEvent(event *github.DeleteEvent) {
 	}
 }
 
-func (p *Plugin) postIssueCommentEvent(event *github.IssueCommentEvent) {
-	repo := event.GetRepo()
+func (p *Plugin) postIssueCommentEvent(event *FIssueCommentEvent) {
+	repo := event.Repo
 
-	subs := p.GetSubscribedChannelsForRepository(repo)
+	subs := p.GetSubscribedChannelsForRepository(*repo.FullName, *repo.Private)
 
 	if len(subs) == 0 {
 		return
 	}
 
-	if event.GetAction() != actionCreated {
+	if *event.Action != actionCreated {
 		return
 	}
 
@@ -781,9 +802,9 @@ func (p *Plugin) postIssueCommentEvent(event *github.IssueCommentEvent) {
 		return
 	}
 
-	labels := make([]string, len(event.GetIssue().Labels))
-	for i, v := range event.GetIssue().Labels {
-		labels[i] = v.GetName()
+	labels := make([]string, len(event.Issue.Labels))
+	for i, v := range event.Issue.Labels {
+		labels[i] = *v.Name
 	}
 
 	for _, sub := range subs {
@@ -791,7 +812,7 @@ func (p *Plugin) postIssueCommentEvent(event *github.IssueCommentEvent) {
 			continue
 		}
 
-		if p.excludeConfigOrgMember(event.GetSender(), sub) {
+		if p.excludeConfigOrgMember(*event.Sender.Login, sub) {
 			continue
 		}
 
@@ -810,14 +831,14 @@ func (p *Plugin) postIssueCommentEvent(event *github.IssueCommentEvent) {
 
 		post := p.makeBotPost("", "custom_git_comment")
 
-		repoName := strings.ToLower(repo.GetFullName())
-		commentID := event.GetComment().GetID()
+		repoName := strings.ToLower(*repo.FullName)
+		commentID := event.Comment.ID
 
 		post.AddProp(postPropForgejoRepo, repoName)
 		post.AddProp(postPropForgejoObjectID, commentID)
 		post.AddProp(postPropForgejoObjectType, forgejoObjectTypeIssueComment)
 
-		if event.GetAction() == actionCreated {
+		if *event.Action == actionCreated {
 			post.Message = message
 		}
 
@@ -844,7 +865,7 @@ func (p *Plugin) senderMutedByReceiver(userID string, sender string) bool {
 func (p *Plugin) postPullRequestReviewEvent(event *github.PullRequestReviewEvent) {
 	repo := event.GetRepo()
 
-	subs := p.GetSubscribedChannelsForRepository(repo)
+	subs := p.GetSubscribedChannelsForRepository(repo.GetFullName(), repo.GetPrivate())
 	if len(subs) == 0 {
 		return
 	}
@@ -879,7 +900,7 @@ func (p *Plugin) postPullRequestReviewEvent(event *github.PullRequestReviewEvent
 			continue
 		}
 
-		if p.excludeConfigOrgMember(event.GetSender(), sub) {
+		if p.excludeConfigOrgMember(event.GetSender().GetLogin(), sub) {
 			continue
 		}
 
@@ -908,7 +929,7 @@ func (p *Plugin) postPullRequestReviewEvent(event *github.PullRequestReviewEvent
 func (p *Plugin) postPullRequestReviewCommentEvent(event *github.PullRequestReviewCommentEvent) {
 	repo := event.GetRepo()
 
-	subs := p.GetSubscribedChannelsForRepository(repo)
+	subs := p.GetSubscribedChannelsForRepository(repo.GetFullName(), repo.GetPrivate())
 	if len(subs) == 0 {
 		return
 	}
@@ -929,7 +950,7 @@ func (p *Plugin) postPullRequestReviewCommentEvent(event *github.PullRequestRevi
 			continue
 		}
 
-		if p.excludeConfigOrgMember(event.GetSender(), sub) {
+		if p.excludeConfigOrgMember(event.GetSender().GetLogin(), sub) {
 			continue
 		}
 
@@ -962,13 +983,13 @@ func (p *Plugin) postPullRequestReviewCommentEvent(event *github.PullRequestRevi
 	}
 }
 
-func (p *Plugin) handleCommentMentionNotification(event *github.IssueCommentEvent) {
-	action := event.GetAction()
+func (p *Plugin) handleCommentMentionNotification(event *FIssueCommentEvent) {
+	action := *event.Action
 	if action == actionEdited || action == actionDeleted {
 		return
 	}
 
-	body := event.GetComment().GetBody()
+	body := *event.Comment.Body
 
 	// Try to parse out email footer junk
 	if strings.Contains(body, "notifications@forgejo.com") {
@@ -983,7 +1004,7 @@ func (p *Plugin) handleCommentMentionNotification(event *github.IssueCommentEven
 		return
 	}
 
-	assignees := event.GetIssue().Assignees
+	assignees := event.Issue.Assignees
 
 	for _, username := range mentionedUsernames {
 		assigneeMentioned := false
@@ -1000,12 +1021,12 @@ func (p *Plugin) handleCommentMentionNotification(event *github.IssueCommentEven
 		}
 
 		// Don't notify user of their own comment
-		if username == event.GetSender().GetLogin() {
+		if username == *event.Sender.Login {
 			continue
 		}
 
 		// Notifications for issue authors are handled separately
-		if username == event.GetIssue().GetUser().GetLogin() {
+		if username == *event.Issue.User.Login {
 			continue
 		}
 
@@ -1014,7 +1035,7 @@ func (p *Plugin) handleCommentMentionNotification(event *github.IssueCommentEven
 			continue
 		}
 
-		if event.GetRepo().GetPrivate() && !p.permissionToRepo(userID, event.GetRepo().GetFullName()) {
+		if *event.Repo.Private && !p.permissionToRepo(userID, *event.Repo.FullName) {
 			continue
 		}
 
@@ -1034,13 +1055,13 @@ func (p *Plugin) handleCommentMentionNotification(event *github.IssueCommentEven
 	}
 }
 
-func (p *Plugin) handleCommentAuthorNotification(event *github.IssueCommentEvent) {
-	author := event.GetIssue().GetUser().GetLogin()
-	if author == event.GetSender().GetLogin() {
+func (p *Plugin) handleCommentAuthorNotification(event *FIssueCommentEvent) {
+	author := *event.Issue.User.Login
+	if author == *event.Sender.Login {
 		return
 	}
 
-	action := event.GetAction()
+	action := *event.Action
 	if action == actionEdited || action == actionDeleted {
 		return
 	}
@@ -1050,18 +1071,18 @@ func (p *Plugin) handleCommentAuthorNotification(event *github.IssueCommentEvent
 		return
 	}
 
-	if event.GetRepo().GetPrivate() && !p.permissionToRepo(authorUserID, event.GetRepo().GetFullName()) {
+	if *event.Repo.Private && !p.permissionToRepo(authorUserID, *event.Repo.FullName) {
 		return
 	}
 
-	splitURL := strings.Split(event.GetIssue().GetHTMLURL(), "/")
+	splitURL := strings.Split(*event.Issue.HTMLURL, "/")
 	if len(splitURL) < 2 {
 		return
 	}
 
 	var templateName string
 	switch splitURL[len(splitURL)-2] {
-	case "pull":
+	case "pulls":
 		templateName = "commentAuthorPullRequestNotification"
 	case "issues":
 		templateName = "commentAuthorIssueNotification"
@@ -1070,7 +1091,7 @@ func (p *Plugin) handleCommentAuthorNotification(event *github.IssueCommentEvent
 		return
 	}
 
-	if p.senderMutedByReceiver(authorUserID, event.GetSender().GetLogin()) {
+	if p.senderMutedByReceiver(authorUserID, *event.Sender.Login) {
 		p.client.Log.Debug("Commenter is muted, skipping notification")
 		return
 	}
@@ -1085,12 +1106,12 @@ func (p *Plugin) handleCommentAuthorNotification(event *github.IssueCommentEvent
 	p.sendRefreshEvent(authorUserID)
 }
 
-func (p *Plugin) handleCommentAssigneeNotification(event *github.IssueCommentEvent) {
-	author := event.GetIssue().GetUser().GetLogin()
-	assignees := event.GetIssue().Assignees
-	repoName := event.GetRepo().GetFullName()
+func (p *Plugin) handleCommentAssigneeNotification(event *FIssueCommentEvent) {
+	author := event.Issue.User.Login
+	assignees := event.Issue.Assignees
+	repoName := event.Repo.FullName
 
-	splitURL := strings.Split(event.GetIssue().GetHTMLURL(), "/")
+	splitURL := strings.Split(*event.Issue.HTMLURL, "/")
 	if len(splitURL) < 2 {
 		return
 	}
@@ -1098,7 +1119,7 @@ func (p *Plugin) handleCommentAssigneeNotification(event *github.IssueCommentEve
 	eventType := splitURL[len(splitURL)-2]
 	var templateName string
 	switch eventType {
-	case "pull":
+	case "pulls":
 		templateName = "commentAssigneePullRequestNotification"
 	case "issues":
 		templateName = "commentAssigneeIssueNotification"
@@ -1107,7 +1128,7 @@ func (p *Plugin) handleCommentAssigneeNotification(event *github.IssueCommentEve
 		return
 	}
 
-	mentionedUsernames := parseGitHubUsernamesFromText(event.GetComment().GetBody())
+	mentionedUsernames := parseGitHubUsernamesFromText(*event.Comment.Body)
 
 	for _, assignee := range assignees {
 		usernameMentioned := false
@@ -1121,35 +1142,35 @@ func (p *Plugin) handleCommentAssigneeNotification(event *github.IssueCommentEve
 
 		if usernameMentioned {
 			switch eventType {
-			case "pull":
+			case "pulls":
 				template = "commentAssigneeSelfMentionPullRequestNotification"
 			case "issues":
 				template = "commentAssigneeSelfMentionIssueNotification"
 			}
 		}
 
-		userID := p.getGitHubToUserIDMapping(assignee.GetLogin())
+		userID := p.getGitHubToUserIDMapping(*assignee.Login)
 		if userID == "" {
 			continue
 		}
 
-		if author == assignee.GetLogin() {
+		if author == assignee.Login {
 			continue
 		}
-		if event.Sender.GetLogin() == assignee.GetLogin() {
-			continue
-		}
-
-		if !p.permissionToRepo(userID, repoName) {
+		if event.Sender.Login == assignee.Login {
 			continue
 		}
 
-		assigneeID := p.getGitHubToUserIDMapping(assignee.GetLogin())
+		if !p.permissionToRepo(userID, *repoName) {
+			continue
+		}
+
+		assigneeID := p.getGitHubToUserIDMapping(*assignee.Login)
 		if assigneeID == "" {
 			continue
 		}
 
-		if p.senderMutedByReceiver(assigneeID, event.GetSender().GetLogin()) {
+		if p.senderMutedByReceiver(assigneeID, *event.Sender.Login) {
 			p.client.Log.Debug("Commenter is muted, skipping notification")
 			continue
 		}
@@ -1320,7 +1341,7 @@ func (p *Plugin) handlePullRequestReviewNotification(event *github.PullRequestRe
 func (p *Plugin) postStarEvent(event *github.StarEvent) {
 	repo := event.GetRepo()
 
-	subs := p.GetSubscribedChannelsForRepository(repo)
+	subs := p.GetSubscribedChannelsForRepository(repo.GetFullName(), repo.GetPrivate())
 
 	if len(subs) == 0 {
 		return
@@ -1337,7 +1358,7 @@ func (p *Plugin) postStarEvent(event *github.StarEvent) {
 			continue
 		}
 
-		if p.excludeConfigOrgMember(event.GetSender(), sub) {
+		if p.excludeConfigOrgMember(event.GetSender().GetLogin(), sub) {
 			continue
 		}
 
@@ -1364,7 +1385,7 @@ func (p *Plugin) postReleaseEvent(event *github.ReleaseEvent) {
 	}
 
 	repo := event.GetRepo()
-	subs := p.GetSubscribedChannelsForRepository(repo)
+	subs := p.GetSubscribedChannelsForRepository(repo.GetFullName(), repo.GetPrivate())
 
 	if len(subs) == 0 {
 		return
@@ -1397,7 +1418,7 @@ func (p *Plugin) postReleaseEvent(event *github.ReleaseEvent) {
 func (p *Plugin) postDiscussionEvent(event *github.DiscussionEvent) {
 	repo := event.GetRepo()
 
-	subs := p.GetSubscribedChannelsForRepository(repo)
+	subs := p.GetSubscribedChannelsForRepository(repo.GetFullName(), repo.GetPrivate())
 	if len(subs) == 0 {
 		return
 	}
@@ -1413,7 +1434,7 @@ func (p *Plugin) postDiscussionEvent(event *github.DiscussionEvent) {
 			continue
 		}
 
-		if p.excludeConfigOrgMember(event.GetSender(), sub) {
+		if p.excludeConfigOrgMember(event.GetSender().GetLogin(), sub) {
 			continue
 		}
 
@@ -1435,7 +1456,7 @@ func (p *Plugin) postDiscussionEvent(event *github.DiscussionEvent) {
 func (p *Plugin) postDiscussionCommentEvent(event *github.DiscussionCommentEvent) {
 	repo := event.GetRepo()
 
-	subs := p.GetSubscribedChannelsForRepository(repo)
+	subs := p.GetSubscribedChannelsForRepository(repo.GetFullName(), repo.GetPrivate())
 	if len(subs) == 0 {
 		return
 	}
@@ -1454,7 +1475,7 @@ func (p *Plugin) postDiscussionCommentEvent(event *github.DiscussionCommentEvent
 			continue
 		}
 
-		if p.excludeConfigOrgMember(event.GetSender(), sub) {
+		if p.excludeConfigOrgMember(event.GetSender().GetLogin(), sub) {
 			continue
 		}
 
