@@ -297,7 +297,7 @@ func (p *Plugin) getPostPropsForReaction(reaction *model.Reaction) (org, repo st
 		return org, repo, id, objectType, false
 	}
 
-	// Getting the Github repository from notification post props
+	// Getting the Forgejo repository from notification post props
 	repo, ok = post.GetProp(postPropForgejoRepo).(string)
 	if !ok || repo == "" {
 		return org, repo, id, objectType, false
@@ -317,7 +317,7 @@ func (p *Plugin) getPostPropsForReaction(reaction *model.Reaction) (org, repo st
 		return org, repo, id, objectType, false
 	}
 
-	// Getting the Github object type from notification post props
+	// Getting the Forgejo object type from notification post props
 	objectType, ok = post.GetProp(postPropForgejoObjectType).(string)
 	if !ok || objectType == "" {
 		return org, repo, id, objectType, false
@@ -614,9 +614,9 @@ func (p *Plugin) storeGitHubToUserIDMapping(githubUsername, userID string) error
 	return nil
 }
 
-func (p *Plugin) getGitHubToUserIDMapping(githubUsername string) string {
+func (p *Plugin) getForgejoToUserIDMapping(forgejoUsername string) string {
 	var data []byte
-	err := p.store.Get(githubUsername+forgejoUsernameKey, &data)
+	err := p.store.Get(forgejoUsername+forgejoUsernameKey, &data)
 	if err != nil {
 		p.client.Log.Warn("Error occurred while getting the user ID from KV store using the Forgejo username", "error", err.Error())
 		return ""
@@ -627,7 +627,7 @@ func (p *Plugin) getGitHubToUserIDMapping(githubUsername string) string {
 
 // getGitHubToUsernameMapping maps a GitHub username to the corresponding Mattermost username, if any.
 func (p *Plugin) getGitHubToUsernameMapping(githubUsername string) string {
-	user, _ := p.client.User.Get(p.getGitHubToUserIDMapping(githubUsername))
+	user, _ := p.client.User.Get(p.getForgejoToUserIDMapping(githubUsername))
 	if user == nil {
 		return ""
 	}

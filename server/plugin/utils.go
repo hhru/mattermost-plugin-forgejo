@@ -99,7 +99,7 @@ func parseOwnerAndRepo(full, baseURL string) (string, string) {
 	return owner, repo
 }
 
-func parseGitHubUsernamesFromText(text string) []string {
+func parseForgejoUsernamesFromText(text string) []string {
 	usernameMap := map[string]bool{}
 	usernames := []string{}
 

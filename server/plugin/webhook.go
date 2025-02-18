@@ -29,24 +29,29 @@ const (
 	actionLabeled              = "labeled"
 	actionAssigned             = "assigned"
 
-	actionCreated = "created"
-	actionDeleted = "deleted"
-	actionEdited  = "edited"
+	actionReviewed = "reviewed"
+	actionCreated  = "created"
+	actionDeleted  = "deleted"
+	actionEdited   = "edited"
 
-	postPropForgejoRepo       = "gh_repo"
-	postPropForgejoObjectID   = "gh_object_id"
-	postPropForgejoObjectType = "gh_object_type"
+	postPropForgejoRepo       = "fg_repo"
+	postPropForgejoObjectID   = "fg_object_id"
+	postPropForgejoObjectType = "fg_object_type"
 
 	forgejoObjectTypeIssue             = "issue"
 	forgejoObjectTypeIssueComment      = "issue_comment"
 	forgejoObjectTypePRReviewComment   = "pr_review_comment"
 	forgejoObjectTypeDiscussionComment = "discussion_comment"
-	forgejoEventTypeHeader             = "X-Forgejo-Event"
+	forgejoEventHeader                 = "X-Forgejo-Event"
 )
 
 var (
 	eventTypeMapping = map[string]interface{}{
-		"issue_comment": &FIssueCommentEvent{},
+		"issue_comment":         &FIssueCommentEvent{},
+		"pull_request":          &FPullRequestEvent{},
+		"pull_request_comment":  &FPullRequestReviewCommentEvent{},
+		"pull_request_approved": &FPullRequestReviewEvent{},
+		"pull_request_rejected": &FPullRequestReviewEvent{},
 	}
 )
 
@@ -213,7 +218,8 @@ func (p *Plugin) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	eventType, ok := eventTypeMapping[r.Header.Get(forgejoEventTypeHeader)]
+	forgejoEventHeader := r.Header.Get(forgejoEventHeader)
+	eventType, ok := eventTypeMapping[forgejoEventHeader]
 	event := reflect.New(reflect.TypeOf(eventType).Elem()).Interface()
 	if ok {
 		r := json.Unmarshal(body, &event)
@@ -248,8 +254,10 @@ func (p *Plugin) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		handler = func() {
 			p.webhookBroker.publishPing(event, false)
 		}
-	case *github.PullRequestEvent:
-		repo = event.GetRepo()
+	case *FPullRequestEvent:
+		repo = &github.Repository{
+			Private: event.Repo.Private,
+		}
 		handler = func() {
 			p.postPullRequestEvent(event)
 			p.handlePullRequestNotification(event)
@@ -271,14 +279,18 @@ func (p *Plugin) handleWebhook(w http.ResponseWriter, r *http.Request) {
 			p.handleCommentAuthorNotification(event)
 			p.handleCommentAssigneeNotification(event)
 		}
-	case *github.PullRequestReviewEvent:
-		repo = event.GetRepo()
+	case *FPullRequestReviewEvent:
+		repo = &github.Repository{
+			Private: event.Repo.Private,
+		}
 		handler = func() {
 			p.postPullRequestReviewEvent(event)
 			p.handlePullRequestReviewNotification(event)
 		}
-	case *github.PullRequestReviewCommentEvent:
-		repo = event.GetRepo()
+	case *FPullRequestReviewCommentEvent:
+		repo = &github.Repository{
+			Private: event.Repo.Private,
+		}
 		handler = func() {
 			p.postPullRequestReviewCommentEvent(event)
 		}
@@ -381,31 +393,29 @@ func (p *Plugin) excludeConfigOrgMember(username string, subscription *Subscript
 	return p.isUserOrganizationMember(githubClient, username, organization)
 }
 
-func (p *Plugin) postPullRequestEvent(event *github.PullRequestEvent) {
-	repo := event.GetRepo()
+func (p *Plugin) postPullRequestEvent(event *FPullRequestEvent) {
+	repo := event.Repo
 
-	subs := p.GetSubscribedChannelsForRepository(repo.GetFullName(), repo.GetPrivate())
+	subs := p.GetSubscribedChannelsForRepository(*repo.FullName, *repo.Private)
 	if len(subs) == 0 {
 		return
 	}
 
-	action := event.GetAction()
+	action := *event.Action
 	switch action {
 	case actionOpened,
 		actionReopened,
-		actionMarkedReadyForReview,
-		actionLabeled,
 		actionClosed:
 	default:
 		return
 	}
 
-	pr := event.GetPullRequest()
-	isPRInDraftState := pr.GetDraft()
-	eventLabel := event.GetLabel().GetName()
+	pr := *event.PullRequest
+	isPRInDraftState := *pr.Draft
+	//eventLabel := *event.Label.Name
 	labels := make([]string, len(pr.Labels))
 	for i, v := range pr.Labels {
-		labels[i] = v.GetName()
+		labels[i] = *v.Name
 	}
 
 	closedPRMessage, err := renderTemplate("closedPR", event)
@@ -427,7 +437,7 @@ func (p *Plugin) postPullRequestEvent(event *github.PullRequestEvent) {
 			continue
 		}
 
-		if p.excludeConfigOrgMember(event.GetSender().GetLogin(), sub) {
+		if p.excludeConfigOrgMember(*event.Sender.Login, sub) {
 			continue
 		}
 
@@ -444,8 +454,8 @@ func (p *Plugin) postPullRequestEvent(event *github.PullRequestEvent) {
 			continue
 		}
 
-		repoName := strings.ToLower(repo.GetFullName())
-		prNumber := event.GetPullRequest().Number
+		repoName := strings.ToLower(*repo.FullName)
+		prNumber := event.PullRequest.Number
 
 		post := p.makeBotPost("", "custom_git_pr")
 
@@ -453,19 +463,19 @@ func (p *Plugin) postPullRequestEvent(event *github.PullRequestEvent) {
 		post.AddProp(postPropForgejoObjectID, prNumber)
 		post.AddProp(postPropForgejoObjectType, forgejoObjectTypeIssue)
 
-		if action == actionLabeled {
-			if label != "" && label == eventLabel {
-				pullRequestLabelledMessage, err := renderTemplate("pullRequestLabelled", event)
-				if err != nil {
-					p.client.Log.Warn("Failed to render template", "error", err.Error())
-					return
-				}
-
-				post.Message = pullRequestLabelledMessage
-			} else {
-				continue
-			}
-		}
+		//if action == actionLabeled {
+		//	if label != "" && label == eventLabel {
+		//		pullRequestLabelledMessage, err := renderTemplate("pullRequestLabelled", event)
+		//		if err != nil {
+		//			p.client.Log.Warn("Failed to render template", "error", err.Error())
+		//			return
+		//		}
+		//
+		//		post.Message = pullRequestLabelledMessage
+		//	} else {
+		//		continue
+		//	}
+		//}
 
 		if action == actionOpened {
 			prNotificationType := "newPR"
@@ -491,15 +501,15 @@ func (p *Plugin) postPullRequestEvent(event *github.PullRequestEvent) {
 			post.Message = p.sanitizeDescription(reopenedPRMessage)
 		}
 
-		if action == actionMarkedReadyForReview {
-			markedReadyToReviewPRMessage, err := renderTemplate("markedReadyToReviewPR", GetEventWithRenderConfig(event, sub))
-			if err != nil {
-				p.client.Log.Warn("Failed to render template", "error", err.Error())
-				return
-			}
-
-			post.Message = p.sanitizeDescription(markedReadyToReviewPRMessage)
-		}
+		//if action == actionMarkedReadyForReview {
+		//	markedReadyToReviewPRMessage, err := renderTemplate("markedReadyToReviewPR", GetEventWithRenderConfig(event, sub))
+		//	if err != nil {
+		//		p.client.Log.Warn("Failed to render template", "error", err.Error())
+		//		return
+		//	}
+		//
+		//	post.Message = p.sanitizeDescription(markedReadyToReviewPRMessage)
+		//}
 
 		if action == actionClosed {
 			post.Message = closedPRMessage
@@ -521,15 +531,15 @@ func (p *Plugin) sanitizeDescription(description string) string {
 	return strings.TrimSpace(description)
 }
 
-func (p *Plugin) handlePRDescriptionMentionNotification(event *github.PullRequestEvent) {
-	action := event.GetAction()
+func (p *Plugin) handlePRDescriptionMentionNotification(event *FPullRequestEvent) {
+	action := *event.Action
 	if action != actionOpened {
 		return
 	}
 
-	body := event.GetPullRequest().GetBody()
+	body := *event.PullRequest.Body
 
-	mentionedUsernames := parseGitHubUsernamesFromText(body)
+	mentionedUsernames := parseForgejoUsernamesFromText(body)
 
 	message, err := renderTemplate("pullRequestMentionNotification", event)
 	if err != nil {
@@ -539,21 +549,21 @@ func (p *Plugin) handlePRDescriptionMentionNotification(event *github.PullReques
 
 	for _, username := range mentionedUsernames {
 		// Don't notify user of their own comment
-		if username == event.GetSender().GetLogin() {
+		if username == *event.Sender.Login {
 			continue
 		}
 
 		// Notifications for pull request authors are handled separately
-		if username == event.GetPullRequest().GetUser().GetLogin() {
+		if username == *event.PullRequest.User.Login {
 			continue
 		}
 
-		userID := p.getGitHubToUserIDMapping(username)
+		userID := p.getForgejoToUserIDMapping(username)
 		if userID == "" {
 			continue
 		}
 
-		if event.GetRepo().GetPrivate() && !p.permissionToRepo(userID, event.GetRepo().GetFullName()) {
+		if *event.Repo.Private && !p.permissionToRepo(userID, *event.Repo.FullName) {
 			continue
 		}
 
@@ -862,25 +872,27 @@ func (p *Plugin) senderMutedByReceiver(userID string, sender string) bool {
 	return strings.Contains(mutedUsernames, sender)
 }
 
-func (p *Plugin) postPullRequestReviewEvent(event *github.PullRequestReviewEvent) {
-	repo := event.GetRepo()
+func (p *Plugin) postPullRequestReviewEvent(event *FPullRequestReviewEvent) {
+	repo := event.Repo
 
-	subs := p.GetSubscribedChannelsForRepository(repo.GetFullName(), repo.GetPrivate())
+	subs := p.GetSubscribedChannelsForRepository(*repo.FullName, *repo.Private)
 	if len(subs) == 0 {
 		return
 	}
 
-	action := event.GetAction()
-	if action != actionSubmitted {
+	switch *event.Action {
+	case actionCreated:
+	case actionReviewed:
+	default:
+		p.client.Log.Debug("Unhandled action state", "state", *event.Action)
 		return
 	}
 
-	switch event.GetReview().GetState() {
-	case "approved":
-	case "commented":
-	case "changes_requested":
+	switch *event.Review.Type {
+	case "pull_request_review_approved":
+	case "pull_request_review_rejected":
 	default:
-		p.client.Log.Debug("Unhandled review state", "state", event.GetReview().GetState())
+		p.client.Log.Debug("Unhandled review state", "state", *event.Review.Type)
 		return
 	}
 
@@ -890,9 +902,9 @@ func (p *Plugin) postPullRequestReviewEvent(event *github.PullRequestReviewEvent
 		return
 	}
 
-	labels := make([]string, len(event.GetPullRequest().Labels))
-	for i, v := range event.GetPullRequest().Labels {
-		labels[i] = v.GetName()
+	labels := make([]string, len(event.PullRequest.Labels))
+	for i, v := range event.PullRequest.Labels {
+		labels[i] = *v.Name
 	}
 
 	for _, sub := range subs {
@@ -900,7 +912,7 @@ func (p *Plugin) postPullRequestReviewEvent(event *github.PullRequestReviewEvent
 			continue
 		}
 
-		if p.excludeConfigOrgMember(event.GetSender().GetLogin(), sub) {
+		if p.excludeConfigOrgMember(*event.Sender.Login, sub) {
 			continue
 		}
 
@@ -926,10 +938,10 @@ func (p *Plugin) postPullRequestReviewEvent(event *github.PullRequestReviewEvent
 	}
 }
 
-func (p *Plugin) postPullRequestReviewCommentEvent(event *github.PullRequestReviewCommentEvent) {
-	repo := event.GetRepo()
+func (p *Plugin) postPullRequestReviewCommentEvent(event *FPullRequestReviewCommentEvent) {
+	repo := *event.Repo
 
-	subs := p.GetSubscribedChannelsForRepository(repo.GetFullName(), repo.GetPrivate())
+	subs := p.GetSubscribedChannelsForRepository(*repo.FullName, *repo.Private)
 	if len(subs) == 0 {
 		return
 	}
@@ -940,9 +952,9 @@ func (p *Plugin) postPullRequestReviewCommentEvent(event *github.PullRequestRevi
 		return
 	}
 
-	labels := make([]string, len(event.GetPullRequest().Labels))
-	for i, v := range event.GetPullRequest().Labels {
-		labels[i] = v.GetName()
+	labels := make([]string, len(event.PullRequest.Labels))
+	for i, v := range event.PullRequest.Labels {
+		labels[i] = *v.Name
 	}
 
 	for _, sub := range subs {
@@ -950,7 +962,7 @@ func (p *Plugin) postPullRequestReviewCommentEvent(event *github.PullRequestRevi
 			continue
 		}
 
-		if p.excludeConfigOrgMember(event.GetSender().GetLogin(), sub) {
+		if p.excludeConfigOrgMember(*event.Sender.Login, sub) {
 			continue
 		}
 
@@ -969,8 +981,8 @@ func (p *Plugin) postPullRequestReviewCommentEvent(event *github.PullRequestRevi
 
 		post := p.makeBotPost(newReviewMessage, "custom_git_pr_comment")
 
-		repoName := strings.ToLower(repo.GetFullName())
-		commentID := event.GetComment().GetID()
+		repoName := strings.ToLower(*repo.FullName)
+		commentID := *event.PullRequest.ID
 
 		post.AddProp(postPropForgejoRepo, repoName)
 		post.AddProp(postPropForgejoObjectID, commentID)
@@ -996,7 +1008,7 @@ func (p *Plugin) handleCommentMentionNotification(event *FIssueCommentEvent) {
 		body = strings.Split(body, "\n\nOn")[0]
 	}
 
-	mentionedUsernames := parseGitHubUsernamesFromText(body)
+	mentionedUsernames := parseForgejoUsernamesFromText(body)
 
 	message, err := renderTemplate("commentMentionNotification", event)
 	if err != nil {
@@ -1030,7 +1042,7 @@ func (p *Plugin) handleCommentMentionNotification(event *FIssueCommentEvent) {
 			continue
 		}
 
-		userID := p.getGitHubToUserIDMapping(username)
+		userID := p.getForgejoToUserIDMapping(username)
 		if userID == "" {
 			continue
 		}
@@ -1066,7 +1078,7 @@ func (p *Plugin) handleCommentAuthorNotification(event *FIssueCommentEvent) {
 		return
 	}
 
-	authorUserID := p.getGitHubToUserIDMapping(author)
+	authorUserID := p.getForgejoToUserIDMapping(author)
 	if authorUserID == "" {
 		return
 	}
@@ -1128,7 +1140,7 @@ func (p *Plugin) handleCommentAssigneeNotification(event *FIssueCommentEvent) {
 		return
 	}
 
-	mentionedUsernames := parseGitHubUsernamesFromText(*event.Comment.Body)
+	mentionedUsernames := parseForgejoUsernamesFromText(*event.Comment.Body)
 
 	for _, assignee := range assignees {
 		usernameMentioned := false
@@ -1149,7 +1161,7 @@ func (p *Plugin) handleCommentAssigneeNotification(event *FIssueCommentEvent) {
 			}
 		}
 
-		userID := p.getGitHubToUserIDMapping(*assignee.Login)
+		userID := p.getForgejoToUserIDMapping(*assignee.Login)
 		if userID == "" {
 			continue
 		}
@@ -1165,7 +1177,7 @@ func (p *Plugin) handleCommentAssigneeNotification(event *FIssueCommentEvent) {
 			continue
 		}
 
-		assigneeID := p.getGitHubToUserIDMapping(*assignee.Login)
+		assigneeID := p.getForgejoToUserIDMapping(*assignee.Login)
 		if assigneeID == "" {
 			continue
 		}
@@ -1185,24 +1197,24 @@ func (p *Plugin) handleCommentAssigneeNotification(event *FIssueCommentEvent) {
 	}
 }
 
-func (p *Plugin) handlePullRequestNotification(event *github.PullRequestEvent) {
-	author := event.GetPullRequest().GetUser().GetLogin()
-	sender := event.GetSender().GetLogin()
-	repoName := event.GetRepo().GetFullName()
-	isPrivate := event.GetRepo().GetPrivate()
+func (p *Plugin) handlePullRequestNotification(event *FPullRequestEvent) {
+	author := *event.PullRequest.User.Login
+	sender := *event.Sender.Login
+	repoName := *event.Repo.FullName
+	isPrivate := *event.Repo.Private
 
 	requestedReviewer := ""
 	requestedUserID := ""
 	authorUserID := ""
 	assigneeUserID := ""
 
-	switch event.GetAction() {
+	switch *event.Action {
 	case "review_requested":
-		requestedReviewer = event.GetRequestedReviewer().GetLogin()
+		requestedReviewer = *event.RequestedReviewer.Login
 		if requestedReviewer == sender {
 			return
 		}
-		requestedUserID = p.getGitHubToUserIDMapping(requestedReviewer)
+		requestedUserID = p.getForgejoToUserIDMapping(requestedReviewer)
 		if isPrivate && !p.permissionToRepo(requestedUserID, repoName) {
 			requestedUserID = ""
 		}
@@ -1210,7 +1222,7 @@ func (p *Plugin) handlePullRequestNotification(event *github.PullRequestEvent) {
 		if author == sender {
 			return
 		}
-		authorUserID = p.getGitHubToUserIDMapping(author)
+		authorUserID = p.getForgejoToUserIDMapping(author)
 		if isPrivate && !p.permissionToRepo(authorUserID, repoName) {
 			authorUserID = ""
 		}
@@ -1218,16 +1230,16 @@ func (p *Plugin) handlePullRequestNotification(event *github.PullRequestEvent) {
 		if author == sender {
 			return
 		}
-		authorUserID = p.getGitHubToUserIDMapping(author)
+		authorUserID = p.getForgejoToUserIDMapping(author)
 		if isPrivate && !p.permissionToRepo(authorUserID, repoName) {
 			authorUserID = ""
 		}
 	case actionAssigned:
-		assignee := event.GetPullRequest().GetAssignee().GetLogin()
+		assignee := *event.PullRequest.Assignee.Login
 		if assignee == sender {
 			return
 		}
-		assigneeUserID = p.getGitHubToUserIDMapping(assignee)
+		assigneeUserID = p.getForgejoToUserIDMapping(assignee)
 		if isPrivate && !p.permissionToRepo(assigneeUserID, repoName) {
 			assigneeUserID = ""
 		}
@@ -1265,12 +1277,12 @@ func (p *Plugin) handleIssueNotification(event *github.IssuesEvent) {
 
 	switch event.GetAction() {
 	case actionClosed:
-		authorUserID = p.getGitHubToUserIDMapping(author)
+		authorUserID = p.getForgejoToUserIDMapping(author)
 		if isPrivate && !p.permissionToRepo(authorUserID, repoName) {
 			authorUserID = ""
 		}
 	case actionReopened:
-		authorUserID = p.getGitHubToUserIDMapping(author)
+		authorUserID = p.getForgejoToUserIDMapping(author)
 		if isPrivate && !p.permissionToRepo(authorUserID, repoName) {
 			authorUserID = ""
 		}
@@ -1279,7 +1291,7 @@ func (p *Plugin) handleIssueNotification(event *github.IssuesEvent) {
 		if assignee == sender {
 			return
 		}
-		assigneeUserID = p.getGitHubToUserIDMapping(assignee)
+		assigneeUserID = p.getForgejoToUserIDMapping(assignee)
 		if isPrivate && !p.permissionToRepo(assigneeUserID, repoName) {
 			assigneeUserID = ""
 		}
@@ -1309,22 +1321,23 @@ func (p *Plugin) postIssueNotification(message, authorUserID, assigneeUserID str
 	}
 }
 
-func (p *Plugin) handlePullRequestReviewNotification(event *github.PullRequestReviewEvent) {
-	author := event.GetPullRequest().GetUser().GetLogin()
-	if author == event.GetSender().GetLogin() {
+func (p *Plugin) handlePullRequestReviewNotification(event *FPullRequestReviewEvent) {
+	author := *event.PullRequest.User.Login
+	if author == *event.Sender.Login {
 		return
 	}
 
-	if event.GetAction() != actionSubmitted {
-		return
-	}
+	//there is no such action in forgejo
+	//if *event.Action != actionSubmitted {
+	//	return
+	//}
 
-	authorUserID := p.getGitHubToUserIDMapping(author)
+	authorUserID := p.getForgejoToUserIDMapping(author)
 	if authorUserID == "" {
 		return
 	}
 
-	if event.GetRepo().GetPrivate() && !p.permissionToRepo(authorUserID, event.GetRepo().GetFullName()) {
+	if *event.Repo.Private && !p.permissionToRepo(authorUserID, *event.Repo.FullName) {
 		return
 	}
 

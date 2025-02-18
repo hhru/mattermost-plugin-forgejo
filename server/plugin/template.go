@@ -127,7 +127,7 @@ func init() {
 	template.Must(masterTemplate.New("FUser").Parse(`
 {{- $mattermostUsername := .Login | lookupMattermostUsername}}
 {{- if $mattermostUsername }}@{{$mattermostUsername}}
-{{- else}}[{{.GetLogin}}]({{.HTMLURL}})
+{{- else}}[{{.Login}}]({{.HTMLURL}})
 {{- end -}}
 	`))
 
@@ -142,26 +142,30 @@ func init() {
 
 	// The eventRepoPullRequest links to the corresponding pull request, anchored at the repo.
 	template.Must(masterTemplate.New("eventRepoPullRequest").Parse(
-		`[{{.GetRepo.GetFullName}}#{{.GetPullRequest.GetNumber}}]({{.GetPullRequest.GetHTMLURL}})`,
+		`[{{.Repo.FullName}}#{{.PullRequest.Number}}]({{.PullRequest.HTMLURL}})`,
 	))
 
 	template.Must(masterTemplate.New("eventRepoPullRequestWithTitle").Parse(
-		`{{template "eventRepoPullRequest" .}} - {{.GetPullRequest.GetTitle}}`,
+		`{{template "eventRepoPullRequest" .}} - {{.PullRequest.Title}}`,
 	))
 
 	// The reviewRepoPullRequest links to the corresponding pull request, anchored at the repo.
 	template.Must(masterTemplate.New("reviewRepoPullRequest").Parse(
-		`[{{.GetRepo.GetFullName}}#{{.GetPullRequest.GetNumber}}]({{.GetReview.GetHTMLURL}})`,
+		`[{{.Repo.FullName}}#{{.PullRequest.Number}}]({{.PullRequest.HTMLURL}})`,
 	))
 
 	// this reviewRepoPullRequestWithTitle just adds title
 	template.Must(masterTemplate.New("reviewRepoPullRequestWithTitle").Parse(
-		`{{template "reviewRepoPullRequest" .}} - {{.GetPullRequest.GetTitle}}`,
+		`{{template "reviewRepoPullRequest" .}} - {{.PullRequest.Title}}`,
 	))
 
 	// The pullRequest links to the corresponding pull request, skipping the repo title.
 	template.Must(masterTemplate.New("pullRequest").Parse(
 		`[#{{.GetNumber}} {{.GetTitle}}]({{.GetHTMLURL}})`,
+	))
+
+	template.Must(masterTemplate.New("FPullRequest").Parse(
+		`[#{{.Number}} {{.Title}}]({{.HTMLURL}})`,
 	))
 
 	// The issue links to the corresponding issue.
@@ -207,9 +211,21 @@ Labels: {{range $i, $el := .Labels -}}` + "{{- if $i}}, {{end}}[`{{ $el.Name }}`
 {{ end -}}
 `))
 
+	template.Must(masterTemplate.New("FLabels").Funcs(funcMap).Parse(`
+{{- if .Labels }}
+Labels: {{range $i, $el := .Labels -}}` + "{{- if $i}}, {{end}}[`{{ $el.Name }}`]({{ $.RepositoryURL }}/labels/{{ $el.Name | pathEscape }})" + `{{end -}}
+{{ end -}}
+`))
+
 	template.Must(masterTemplate.New("assignee").Funcs(funcMap).Parse(`
 {{- if .Assignees }}
 Assignees: {{range $i, $el := .Assignees -}} {{- if $i}}, {{end}}{{template "user" $el}}{{end -}}
+{{- end -}}
+`))
+
+	template.Must(masterTemplate.New("FAssignee").Funcs(funcMap).Parse(`
+{{- if .Assignees }}
+Assignees: {{range $i, $el := .Assignees -}} {{- if $i}}, {{end}}{{template "FUser" $el}}{{end -}}
 {{- end -}}
 `))
 
@@ -219,16 +235,16 @@ Assignees: {{range $i, $el := .Assignees -}} {{- if $i}}, {{end}}{{template "use
 
 	template.Must(masterTemplate.New("newPR").Funcs(funcMap).Parse(`
 {{ if eq .Config.Style "collapsed" -}}
-{{template "repo" .Event.GetRepo}} New pull request {{template "pullRequest" .Event.GetPullRequest}} was opened by {{template "user" .Event.GetSender}}.
+{{template "FRepo" .Event.Repo}} New pull request {{template "FPullRequest" .Event.PullRequest}} was opened by {{template "FUser" .Event.Sender}}.
 {{- else -}}
-#### {{.Event.GetPullRequest.GetTitle}}
+#### {{.Event.PullRequest.Title}}
 ##### {{template "eventRepoPullRequest" .Event}}
-#new-pull-request by {{template "user" .Event.GetSender}}
+#new-pull-request by {{template "FUser" .Event.Sender}}
 {{- if ne .Config.Style "skip-body" -}}
-{{- template "labels" dict "Labels" .Event.GetPullRequest.Labels "RepositoryURL" .Event.GetRepo.GetHTMLURL  }}
-{{- template "assignee" .Event.GetPullRequest }}
+{{- template "FLabels" dict "Labels" .Event.PullRequest.Labels "RepositoryURL" .Event.Repo.HTMLURL  }}
+{{- template "FAssignee" .Event.PullRequest }}
 
-{{.Event.GetPullRequest.GetBody | removeComments | replaceAllForgejoUsernames}}
+{{.Event.PullRequest.Body | removeComments | replaceAllForgejoUsernames}}
 {{- end -}}
 {{- end }}
 `))
@@ -250,14 +266,14 @@ Assignees: {{range $i, $el := .Assignees -}} {{- if $i}}, {{end}}{{template "use
 `))
 
 	template.Must(masterTemplate.New("closedPR").Funcs(funcMap).Parse(`
-{{template "repo" .GetRepo}} Pull request {{template "pullRequest" .GetPullRequest}} was
+{{template "FRepo" .Repo}} Pull request {{template "FPullRequest" .PullRequest}} was
 {{- if .GetPullRequest.GetMerged }} merged
 {{- else }} closed
-{{- end }} by {{template "user" .GetSender}}.
+{{- end }} by {{template "FUser" .Sender}}.
 `))
 
 	template.Must(masterTemplate.New("reopenedPR").Funcs(funcMap).Parse(`
-{{template "repo" .GetRepo}} Pull request {{template "pullRequest" .GetPullRequest}} was reopened by {{template "user" .GetSender}}.
+{{template "FRepo" .Repo}} Pull request {{template "FPullRequest" .PullRequest}} was reopened by {{template "FUser" .Sender}}.
 `))
 
 	template.Must(masterTemplate.New("pullRequestLabelled").Funcs(funcMap).Parse(`
@@ -267,8 +283,8 @@ Assignees: {{range $i, $el := .Assignees -}} {{- if $i}}, {{end}}{{template "use
 `))
 
 	template.Must(masterTemplate.New("pullRequestMentionNotification").Funcs(funcMap).Parse(`
-{{template "user" .GetSender}} mentioned you on [{{.GetRepo.GetFullName}}#{{.GetPullRequest.GetNumber}}]({{.GetPullRequest.GetHTMLURL}}) - {{.GetPullRequest.GetTitle}}:
-{{.GetPullRequest.GetBody | trimBody | quote | replaceAllForgejoUsernames}}`))
+{{template "FUser" .Sender}} mentioned you on [{{.Repo.FullName}}#{{.PullRequest.Number}}]({{.PullRequest.HTMLURL}}) - {{.PullRequest.Title}}:
+{{.PullRequest.Body | trimBody | quote | replaceAllForgejoUsernames}}`))
 
 	template.Must(masterTemplate.New("newIssue").Funcs(funcMap).Parse(`
 {{ if eq .Config.Style "collapsed" -}}
@@ -322,19 +338,19 @@ Assignees: {{range $i, $el := .Assignees -}} {{- if $i}}, {{end}}{{template "use
 `))
 
 	template.Must(masterTemplate.New("pullRequestReviewEvent").Funcs(funcMap).Parse(`
-{{template "repo" .GetRepo}} {{template "user" .GetSender}}
-{{- if eq .GetReview.GetState "approved"}} approved
-{{- else if eq .GetReview.GetState "commented"}} commented on
-{{- else if eq .GetReview.GetState "changes_requested"}} requested changes on
-{{- end }} {{template "pullRequest" .GetPullRequest}}:
+{{template "FRepo" .Repo}} {{template "FUser" .Sender}}
+{{- if eq .GetReview.GetType "pull_request_review_approved"}} approved
+{{- else if eq .GetReview.GetType "commented"}} commented on
+{{- else if eq .GetReview.GetType "pull_request_review_rejected"}} requested changes on
+{{- end }} {{template "FPullRequest" .PullRequest}}:
 
-{{.Review.GetBody | replaceAllForgejoUsernames}}
+{{.Review.Content | replaceAllForgejoUsernames}}
 `))
 
 	template.Must(masterTemplate.New("newReviewComment").Funcs(funcMap).Parse(`
-{{template "repo" .GetRepo}} New review comment by {{template "user" .GetSender}} on {{template "pullRequest" .GetPullRequest}}:
+{{template "FRepo" .Repo}} New review comment by {{template "FUser" .Sender}} on {{template "FPullRequest" .PullRequest}}:
 
-{{.GetComment.GetBody | trimBody | replaceAllForgejoUsernames}}
+{{.PullRequest.Body | trimBody | replaceAllForgejoUsernames}}
 `))
 
 	template.Must(masterTemplate.New("commentMentionNotification").Funcs(funcMap).Parse(`
@@ -373,7 +389,7 @@ Assignees: {{range $i, $el := .Assignees -}} {{- if $i}}, {{end}}{{template "use
 `))
 
 	template.Must(masterTemplate.New("pullRequestNotification").Funcs(funcMap).Parse(`
-{{template "user" .GetSender}}
+{{template "FUser" .Sender}}
 {{- if eq .GetAction "review_requested" }} requested your review on
 {{- else if eq .GetAction "closed" }}
     {{- if .GetPullRequest.GetMerged }} merged your pull request
@@ -393,12 +409,12 @@ Assignees: {{range $i, $el := .Assignees -}} {{- if $i}}, {{end}}{{template "use
 `))
 
 	template.Must(masterTemplate.New("pullRequestReviewNotification").Funcs(funcMap).Parse(`
-{{template "user" .GetSender}}
-{{- if eq .GetReview.GetState "approved" }} approved your pull request
-{{- else if eq .GetReview.GetState "changes_requested" }} requested changes on your pull request
-{{- else if eq .GetReview.GetState "commented" }} commented on your pull request
+{{template "FUser" .Sender}}
+{{- if eq .GetReview.GetType "pull_request_review_approved" }} approved your pull request
+{{- else if eq .GetReview.GetType "pull_request_review_rejected" }} requested changes on your pull request
+{{- else if eq .GetReview.GetType "commented" }} commented on your pull request
 {{- end }} {{template "reviewRepoPullRequestWithTitle" .}}
-{{if .GetReview.GetBody}}{{.Review.GetBody | trimBody | quote | replaceAllForgejoUsernames}}
+{{if .Review.Content}}{{.Review.Content | trimBody | quote | replaceAllForgejoUsernames}}
 {{else}}{{end}}`))
 
 	template.Must(masterTemplate.New("helpText").Parse("" +

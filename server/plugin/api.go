@@ -152,6 +152,86 @@ type FIssueComment struct {
 	HTMLURL *string `json:"html_url,omitempty"`
 }
 
+type FPullRequestReviewCommentEvent struct {
+	Action      *string       `json:"action,omitempty"`
+	PullRequest *FPullRequest `json:"pull_request,omitempty"`
+	Repo        *FRepository  `json:"repository,omitempty"`
+	Sender      *FUser        `json:"sender,omitempty"`
+}
+
+type FPullRequestReviewEvent struct {
+	Action      *string             `json:"action,omitempty"`
+	Review      *FPullRequestReview `json:"review,omitempty"`
+	PullRequest *FPullRequest       `json:"pull_request,omitempty"`
+	Repo        *FRepository        `json:"repository,omitempty"`
+	Sender      *FUser              `json:"sender,omitempty"`
+}
+
+type FPullRequestReview struct {
+	Type    *string `json:"type,omitempty"`
+	Content *string `json:"content,omitempty"`
+}
+
+func (p *FPullRequestReviewEvent) GetReview() *FPullRequestReview {
+	if p == nil {
+		return nil
+	}
+	return p.Review
+}
+
+func (p *FPullRequestReview) GetType() string {
+	if p == nil || p.Type == nil {
+		return ""
+	}
+	return *p.Type
+}
+
+type FPullRequest struct {
+	ID        *int      `json:"id,omitempty"`
+	Labels    []*FLabel `json:"labels,omitempty"`
+	User      *FUser    `json:"user,omitempty"`
+	Number    *int      `json:"number,omitempty"`
+	Draft     *bool     `json:"draft,omitempty"`
+	Merged    *bool     `json:"merged,omitempty"`
+	Title     *string   `json:"title,omitempty"`
+	HTMLURL   *string   `json:"html_url,omitempty"`
+	Assignee  *FUser    `json:"assignee,omitempty"`
+	Assignees []*FUser  `json:"assignees,omitempty"`
+	Body      *string   `json:"body,omitempty"`
+}
+
+func (p *FPullRequestEvent) GetPullRequest() *FPullRequest {
+	if p == nil {
+		return nil
+	}
+	return p.PullRequest
+}
+
+func (p *FPullRequest) GetMerged() bool {
+	if p == nil || p.Merged == nil {
+		return false
+	}
+	return *p.Merged
+}
+
+type FPullRequestEvent struct {
+	Action            *string       `json:"action,omitempty"`
+	Assignee          *FUser        `json:"assignee,omitempty"`
+	Number            *int          `json:"number,omitempty"`
+	PullRequest       *FPullRequest `json:"pull_request,omitempty"`
+	RequestedReviewer *FUser        `json:"requested_reviewer,omitempty"`
+	Repo              *FRepository  `json:"repository,omitempty"`
+	Sender            *FUser        `json:"sender,omitempty"`
+	Label             *FLabel       `json:"label,omitempty"`
+}
+
+func (p *FPullRequestEvent) GetAction() string {
+	if p == nil || p.Action == nil {
+		return ""
+	}
+	return *p.Action
+}
+
 type FTimestamp struct {
 	time.Time
 }
