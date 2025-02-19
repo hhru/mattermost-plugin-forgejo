@@ -220,12 +220,13 @@ func (p *Plugin) handleWebhook(w http.ResponseWriter, r *http.Request) {
 
 	forgejoEventHeader := r.Header.Get(forgejoEventHeader)
 	eventType, ok := eventTypeMapping[forgejoEventHeader]
-	event := reflect.New(reflect.TypeOf(eventType).Elem()).Interface()
+	var event interface{}
 	if ok {
+		event := reflect.New(reflect.TypeOf(eventType).Elem()).Interface()
 		r := json.Unmarshal(body, &event)
 		err = r
 	} else {
-		e, r := github.ParseWebHook(github.WebHookType(r), body)
+		e, r := github.ParseWebHook(forgejoEventHeader, body)
 		event = e
 		err = r
 	}
