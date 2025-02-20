@@ -47,6 +47,11 @@ func init() {
 		return body
 	}
 
+	// Trim space
+	funcMap["trimSpace"] = func(body string) string {
+		return strings.TrimSpace(body)
+	}
+
 	// Trim a ref to use in constructing a link.
 	funcMap["trimRef"] = func(ref string) string {
 		return strings.Replace(ref, "refs/heads/", "", 1)
@@ -319,7 +324,7 @@ Assignees: {{range $i, $el := .Assignees -}} {{- if $i}}, {{end}}{{template "FUs
 	template.Must(masterTemplate.New("pushedCommits").Funcs(funcMap).Parse(`
 {{template "user" .GetSender}} {{if .GetForced}}force-{{end}}pushed [{{len .Commits}} new commit{{if ne (len .Commits) 1}}s{{end}}]({{.GetCompare}}) to [\[{{.GetRepo.GetFullName}}:{{.GetRef | trimRef}}\]]({{.GetRepo.GetHTMLURL}}/tree/{{.GetRef | trimRef}}):
 {{range .Commits -}}
-[` + "`{{.GetID | substr 0 6}}`" + `]({{.GetURL}}) {{.GetMessage}} - {{with . | commitAuthor}}{{.GetName}}{{end}}
+[` + "`{{.GetID | substr 0 6}}`" + `]({{.GetURL}}) {{.GetMessage | trimSpace}} - {{with . | commitAuthor}}{{.GetName}}{{end}}
 {{end -}}
 `))
 
