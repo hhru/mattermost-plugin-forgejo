@@ -322,14 +322,14 @@ Assignees: {{range $i, $el := .Assignees -}} {{- if $i}}, {{end}}{{template "FUs
 `))
 
 	template.Must(masterTemplate.New("pushedCommits").Funcs(funcMap).Parse(`
-{{template "user" .GetSender}} {{if .GetForced}}force-{{end}}pushed [{{len .Commits}} new commit{{if ne (len .Commits) 1}}s{{end}}]({{.GetCompare}}) to [\[{{.GetRepo.GetFullName}}:{{.GetRef | trimRef}}\]]({{.GetRepo.GetHTMLURL}}/tree/{{.GetRef | trimRef}}):
+{{template "user" .GetSender}} {{if .GetForced}}force-{{end}}pushed [{{len .Commits}} new commit{{if ne (len .Commits) 1}}s{{end}}]({{.GetCompare}}) to [\[{{.GetRepo.GetFullName}}:{{.GetRef | trimRef}}\]]({{.GetRepo.GetHTMLURL}}/src/branch/{{.GetRef | trimRef}}):
 {{range .Commits -}}
 [` + "`{{.GetID | substr 0 6}}`" + `]({{.GetURL}}) {{.GetMessage | trimSpace}} - {{with . | commitAuthor}}{{.GetName}}{{end}}
 {{end -}}
 `))
 
 	template.Must(masterTemplate.New("newCreateMessage").Funcs(funcMap).Parse(`
-{{template "repo" .GetRepo}} {{.GetRefType}} [{{.GetRef}}]({{.GetRepo.GetHTMLURL}}/tree/{{.GetRef}}) created by {{template "user" .GetSender}}
+{{template "repo" .GetRepo}} {{.GetRefType}} [{{.GetRef}}]({{.GetRepo.GetHTMLURL}}/src/branch/{{.GetRef}}) created by {{template "user" .GetSender}}
 `))
 
 	template.Must(masterTemplate.New("newDeleteMessage").Funcs(funcMap).Parse(`

@@ -618,7 +618,7 @@ func TestIssueLabelledTemplate(t *testing.T) {
 func TestPushedCommitsTemplate(t *testing.T) {
 	t.Run("single commit", func(t *testing.T) {
 		expected := `
-[panda](https://github.com/panda) pushed [1 new commit](https://github.com/mattermost/mattermost-plugin-github/compare/master...branch) to [\[mattermost-plugin-forgejo:branch\]](https://github.com/mattermost/mattermost-plugin-github/tree/branch):
+[panda](https://github.com/panda) pushed [1 new commit](https://github.com/mattermost/mattermost-plugin-github/compare/master...branch) to [\[mattermost-plugin-forgejo:branch\]](https://github.com/mattermost/mattermost-plugin-github/src/branch/branch):
 [` + "`a10867`" + `](https://github.com/mattermost/mattermost-plugin-github/commit/a10867b14bb761a232cd80139fbd4c0d33264240) Leverage git-get-head - panda
 `
 
@@ -645,7 +645,7 @@ func TestPushedCommitsTemplate(t *testing.T) {
 
 	t.Run("single commit, forced", func(t *testing.T) {
 		expected := `
-[panda](https://github.com/panda) force-pushed [1 new commit](https://github.com/mattermost/mattermost-plugin-github/compare/master...branch) to [\[mattermost-plugin-forgejo:branch\]](https://github.com/mattermost/mattermost-plugin-github/tree/branch):
+[panda](https://github.com/panda) force-pushed [1 new commit](https://github.com/mattermost/mattermost-plugin-github/compare/master...branch) to [\[mattermost-plugin-forgejo:branch\]](https://github.com/mattermost/mattermost-plugin-github/src/branch/branch):
 [` + "`a10867`" + `](https://github.com/mattermost/mattermost-plugin-github/commit/a10867b14bb761a232cd80139fbd4c0d33264240) Leverage git-get-head - panda
 `
 
@@ -672,7 +672,7 @@ func TestPushedCommitsTemplate(t *testing.T) {
 
 	t.Run("two commits", func(t *testing.T) {
 		expected := `
-[panda](https://github.com/panda) pushed [2 new commits](https://github.com/mattermost/mattermost-plugin-github/compare/master...branch) to [\[mattermost-plugin-forgejo:branch\]](https://github.com/mattermost/mattermost-plugin-github/tree/branch):
+[panda](https://github.com/panda) pushed [2 new commits](https://github.com/mattermost/mattermost-plugin-github/compare/master...branch) to [\[mattermost-plugin-forgejo:branch\]](https://github.com/mattermost/mattermost-plugin-github/src/branch/branch):
 [` + "`a10867`" + `](https://github.com/mattermost/mattermost-plugin-github/commit/a10867b14bb761a232cd80139fbd4c0d33264240) Leverage git-get-head - panda
 [` + "`a20867`" + `](https://github.com/mattermost/mattermost-plugin-github/commit/a20867b14bb761a232cd80139fbd4c0d33264240) Merge master - panda
 `
@@ -708,7 +708,7 @@ func TestPushedCommitsTemplate(t *testing.T) {
 
 	t.Run("three commits", func(t *testing.T) {
 		expected := `
-[panda](https://github.com/panda) pushed [3 new commits](https://github.com/mattermost/mattermost-plugin-github/compare/master...branch) to [\[mattermost-plugin-forgejo:branch\]](https://github.com/mattermost/mattermost-plugin-github/tree/branch):
+[panda](https://github.com/panda) pushed [3 new commits](https://github.com/mattermost/mattermost-plugin-github/compare/master...branch) to [\[mattermost-plugin-forgejo:branch\]](https://github.com/mattermost/mattermost-plugin-github/src/branch/branch):
 [` + "`a10867`" + `](https://github.com/mattermost/mattermost-plugin-github/commit/a10867b14bb761a232cd80139fbd4c0d33264240) Leverage git-get-head - panda
 [` + "`a20867`" + `](https://github.com/mattermost/mattermost-plugin-github/commit/a20867b14bb761a232cd80139fbd4c0d33264240) Merge master - panda
 [` + "`a30867`" + `](https://github.com/mattermost/mattermost-plugin-github/commit/a30867b14bb761a232cd80139fbd4c0d33264240) Fix build - panda
@@ -758,7 +758,7 @@ func TestPushedCommitsTemplate(t *testing.T) {
 		})
 
 		expected := `
-[panda](https://github.com/panda) pushed [1 new commit](https://github.com/mattermost/mattermost-plugin-github/compare/master...branch) to [\[mattermost-plugin-forgejo:branch\]](https://github.com/mattermost/mattermost-plugin-github/tree/branch):
+[panda](https://github.com/panda) pushed [1 new commit](https://github.com/mattermost/mattermost-plugin-github/compare/master...branch) to [\[mattermost-plugin-forgejo:branch\]](https://github.com/mattermost/mattermost-plugin-github/src/branch/branch):
 [` + "`a10867`" + `](https://github.com/mattermost/mattermost-plugin-github/commit/a10867b14bb761a232cd80139fbd4c0d33264240) Leverage git-get-head - lion
 `
 
@@ -789,7 +789,7 @@ func TestPushedCommitsTemplate(t *testing.T) {
 
 func TestCreateMessageTemplate(t *testing.T) {
 	expected := `
-[\[mattermost-plugin-forgejo\]](https://github.com/mattermost/mattermost-plugin-github) branch [branchname](https://github.com/mattermost/mattermost-plugin-github/tree/branchname) created by [panda](https://github.com/panda)
+[\[mattermost-plugin-forgejo\]](https://github.com/mattermost/mattermost-plugin-github) branch [branchname](https://github.com/mattermost/mattermost-plugin-github/src/branch/branchname) created by [panda](https://github.com/panda)
 `
 
 	actual, err := renderTemplate("newCreateMessage", &github.CreateEvent{
