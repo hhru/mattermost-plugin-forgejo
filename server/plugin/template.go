@@ -329,7 +329,7 @@ Assignees: {{range $i, $el := .Assignees -}} {{- if $i}}, {{end}}{{template "FUs
 `))
 
 	template.Must(masterTemplate.New("newCreateMessage").Funcs(funcMap).Parse(`
-{{template "repo" .GetRepo}} {{.GetRefType}} [{{.GetRef}}]({{.GetRepo.GetHTMLURL}}/src/branch/{{.GetRef}}) created by {{template "user" .GetSender}}
+{{template "repo" .GetRepo}} {{.GetRefType}} [{{.GetRef | trimRef}}]({{.GetRepo.GetHTMLURL}}/src/branch/{{.GetRef | trimRef}}) created by {{template "user" .GetSender}}
 `))
 
 	template.Must(masterTemplate.New("newDeleteMessage").Funcs(funcMap).Parse(`
