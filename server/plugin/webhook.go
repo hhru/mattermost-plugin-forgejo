@@ -222,7 +222,7 @@ func (p *Plugin) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	eventType, ok := eventTypeMapping[forgejoEventHeader]
 	var event interface{}
 	if ok {
-		event := reflect.New(reflect.TypeOf(eventType).Elem()).Interface()
+		event = reflect.New(reflect.TypeOf(eventType).Elem()).Interface()
 		r := json.Unmarshal(body, &event)
 		err = r
 	} else {
