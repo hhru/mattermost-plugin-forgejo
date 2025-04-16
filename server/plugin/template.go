@@ -8,7 +8,6 @@ import (
 	"text/template"
 
 	"github.com/Masterminds/sprig/v3"
-	"github.com/google/go-github/v54/github"
 	"github.com/pkg/errors"
 )
 
@@ -110,12 +109,12 @@ func init() {
 		return dict, nil
 	}
 
-	funcMap["commitAuthor"] = func(commit *github.HeadCommit) *github.CommitAuthor {
+	funcMap["commitAuthor"] = func(commit *FHeadCommit) *FCommitAuthor {
 		if showAuthorInCommitNotification {
-			return commit.GetAuthor()
+			return commit.Author
 		}
 
-		return commit.GetCommitter()
+		return commit.Committer
 	}
 
 	masterTemplate = template.Must(template.New("master").Funcs(funcMap).Parse(""))
@@ -322,9 +321,9 @@ Assignees: {{range $i, $el := .Assignees -}} {{- if $i}}, {{end}}{{template "FUs
 `))
 
 	template.Must(masterTemplate.New("pushedCommits").Funcs(funcMap).Parse(`
-{{template "user" .GetSender}} {{if .GetForced}}force-{{end}}pushed [{{len .Commits}} new commit{{if ne (len .Commits) 1}}s{{end}}]({{.GetCompare}}) to [\[{{.GetRepo.GetFullName}}:{{.GetRef | trimRef}}\]]({{.GetRepo.GetHTMLURL}}/src/branch/{{.GetRef | trimRef}}):
+{{template "FUser" .Sender}} {{if .Forced}}force-{{end}}pushed [{{len .Commits}} new commit{{if ne (len .Commits) 1}}s{{end}}]({{.Compare}}) to [{{.Repo.FullName}}:{{.Ref | trimRef}}]({{.Repo.HTMLURL}}/src/branch/{{.Ref | trimRef}}):
 {{range .Commits -}}
-[` + "`{{.GetID | substr 0 6}}`" + `]({{.GetURL}}) {{.GetMessage | trimSpace}} - {{with . | commitAuthor}}{{.GetName}}{{end}}
+[` + "`{{.ID | substr 0 6}}`" + `]({{.URL}}) {{.Message | trimSpace}} - {{with . | commitAuthor}}{{.Name}}{{end}}
 {{end -}}
 `))
 

@@ -52,6 +52,7 @@ var (
 		"pull_request_comment":  &FPullRequestReviewCommentEvent{},
 		"pull_request_approved": &FPullRequestReviewEvent{},
 		"pull_request_rejected": &FPullRequestReviewEvent{},
+		"push":                  &FPushEvent{},
 	}
 )
 
@@ -113,16 +114,6 @@ func GetEventWithRenderConfig(event interface{}, sub *Subscription) *EventWithRe
 		Config: RenderConfig{
 			Style: style,
 		},
-	}
-}
-
-// Hack to convert from github.PushEventRepository to github.Repository
-func ConvertPushEventRepositoryToRepository(pushRepo *github.PushEventRepository) *github.Repository {
-	repoName := pushRepo.GetFullName()
-	private := pushRepo.GetPrivate()
-	return &github.Repository{
-		FullName: &repoName,
-		Private:  &private,
 	}
 }
 
@@ -295,8 +286,11 @@ func (p *Plugin) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		handler = func() {
 			p.postPullRequestReviewCommentEvent(event)
 		}
-	case *github.PushEvent:
-		repo = ConvertPushEventRepositoryToRepository(event.GetRepo())
+	case *FPushEvent:
+		repo = &github.Repository{
+			Private:  event.Repo.Private,
+			FullName: event.Repo.Name,
+		}
 		handler = func() {
 			p.postPushEvent(event)
 		}
@@ -679,11 +673,10 @@ func (p *Plugin) postIssueEvent(event *github.IssuesEvent) {
 	}
 }
 
-func (p *Plugin) postPushEvent(event *github.PushEvent) {
-	repo := event.GetRepo()
+func (p *Plugin) postPushEvent(event *FPushEvent) {
+	repo := event.Repo
 
-	repository := ConvertPushEventRepositoryToRepository(repo)
-	subs := p.GetSubscribedChannelsForRepository(repository.GetFullName(), repository.GetPrivate())
+	subs := p.GetSubscribedChannelsForRepository(*repo.FullName, *repo.Private)
 
 	if len(subs) == 0 {
 		return
@@ -706,7 +699,7 @@ func (p *Plugin) postPushEvent(event *github.PushEvent) {
 			continue
 		}
 
-		if p.excludeConfigOrgMember(event.GetSender().GetLogin(), sub) {
+		if p.excludeConfigOrgMember(*event.Sender.Login, sub) {
 			continue
 		}
 

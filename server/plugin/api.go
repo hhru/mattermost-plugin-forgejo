@@ -172,6 +172,30 @@ type FPullRequestReview struct {
 	Content *string `json:"content,omitempty"`
 }
 
+type FPushEvent struct {
+	Repo    *FRepository   `json:"repository,omitempty"`
+	Sender  *FUser         `json:"sender,omitempty"`
+	Forced  *bool          `json:"forced,omitempty"`
+	Commits []*FHeadCommit `json:"commits,omitempty"`
+	Compare *string        `json:"compare_url,omitempty"`
+	Ref     *string        `json:"ref,omitempty"`
+}
+
+type FHeadCommit struct {
+	ID        *string        `json:"id,omitempty"`
+	URL       *string        `json:"url,omitempty"`
+	Message   *string        `json:"message,omitempty"`
+	Author    *FCommitAuthor `json:"author,omitempty"`
+	Committer *FCommitAuthor `json:"committer,omitempty"`
+}
+
+type FCommitAuthor struct {
+	Date  *FTimestamp `json:"date,omitempty"`
+	Name  *string     `json:"name,omitempty"`
+	Email *string     `json:"email,omitempty"`
+	Login *string     `json:"username,omitempty"`
+}
+
 func (p *FPullRequestReviewEvent) GetReview() *FPullRequestReview {
 	if p == nil {
 		return nil
