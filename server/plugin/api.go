@@ -64,10 +64,10 @@ type FilteredNotification struct {
 }
 
 type SidebarContent struct {
-	PRs         []*github.Issue         `json:"prs"`
-	Reviews     []*github.Issue         `json:"reviews"`
-	Assignments []*github.Issue         `json:"assignments"`
-	Unreads     []*FilteredNotification `json:"unreads"`
+	PRs         []*graphql.GithubPRDetails `json:"prs"`
+	Reviews     []*graphql.GithubPRDetails `json:"reviews"`
+	Assignments []*github.Issue            `json:"assignments"`
+	Unreads     []*FilteredNotification    `json:"unreads"`
 }
 
 type Context struct {

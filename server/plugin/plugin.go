@@ -53,18 +53,19 @@ var (
 	testOAuthServerURL = ""
 )
 
-type kvStore interface {
+type KvStore interface {
 	Set(key string, value any, options ...pluginapi.KVSetOption) (bool, error)
 	ListKeys(page int, count int, options ...pluginapi.ListKeysOption) ([]string, error)
 	Get(key string, o any) error
 	Delete(key string) error
+	SetAtomicWithRetries(key string, valueFunc func(oldValue []byte) (newValue interface{}, err error)) error
 }
 
 type Plugin struct {
 	plugin.MattermostPlugin
 	client *pluginapi.Client
 
-	store kvStore
+	store KvStore
 
 	// configurationLock synchronizes access to the configuration.
 	configurationLock sync.RWMutex
@@ -157,7 +158,7 @@ func (p *Plugin) GetGitHubClient(ctx context.Context, userID string) (*github.Cl
 	return p.githubConnectUser(ctx, userInfo), nil
 }
 
-func (p *Plugin) githubConnectUser(ctx context.Context, info *ForgejoUserInfo) *github.Client {
+func (p *Plugin) githubConnectUser(_ context.Context, info *ForgejoUserInfo) *github.Client {
 	tok := *info.Token
 	return p.githubConnectToken(tok)
 }
