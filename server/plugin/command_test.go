@@ -22,10 +22,10 @@ func getPluginTest(api *plugintest.API, mockKvStore *mocks.MockKvStore) *Plugin 
 	p := NewPlugin()
 	p.setConfiguration(
 		&Configuration{
-			GitHubOrg:               "mockOrg",
-			GitHubOAuthClientID:     "mockID",
-			GitHubOAuthClientSecret: "mockSecret",
-			EncryptionKey:           "mockKey123456789",
+			ForgejoOrg:               "mockOrg",
+			ForgejoOAuthClientID:     "mockID",
+			ForgejoOAuthClientSecret: "mockSecret",
+			EncryptionKey:            "mockKey123456789",
 		})
 	p.initializeAPI()
 
@@ -279,22 +279,23 @@ func TestExecuteCommand(t *testing.T) {
 		SetupMockStore func(*mocks.MockKvStore)
 	}{
 		"about command": {
-			commandArgs:    &model.CommandArgs{Command: "/github about"},
-			expectedMsg:    "GitHub version",
+			commandArgs:    &model.CommandArgs{Command: "/forgejo about"},
+			expectedMsg:    "Forgejo version",
 			SetupMockStore: func(mks *mocks.MockKvStore) {},
 		},
 
 		"help command": {
-			commandArgs: &model.CommandArgs{Command: "/github help", ChannelId: "test-channelID", RootId: "test-rootID", UserId: "test-userID"},
-			expectedMsg: "###### Mattermost GitHub Plugin - Slash Command Help\n",
+			commandArgs: &model.CommandArgs{Command: "/forgejo help", ChannelId: "test-channelID", RootId: "test-rootID", UserId: "test-userID"},
+			expectedMsg: "###### Mattermost Forgejo Plugin - Slash Command Help\n",
 			SetupMockStore: func(mks *mocks.MockKvStore) {
 				mks.EXPECT().Get(gomock.Any(), gomock.Any()).DoAndReturn(func(key string, value interface{}) error {
 					// Cast the value to the appropriate type and updated it
-					if userInfoPtr, ok := value.(**GitHubUserInfo); ok {
-						*userInfoPtr = &GitHubUserInfo{
+					if userInfoPtr, ok := value.(**ForgejoUserInfo); ok {
+						*userInfoPtr = &ForgejoUserInfo{
 							// Mock user info data
 							Token: &oauth2.Token{
-								AccessToken: "ycbODW-BWbNBGfF7ac4T5RL5ruNm5BChCXgbkY1bWHqMt80JTkLsicQwo8de3tqfqlfMaglpgjqGOmSHeGp0dA==",
+								AccessToken:  "ycbODW-BWbNBGfF7ac4T5RL5ruNm5BChCXgbkY1bWHqMt80JTkLsicQwo8de3tqfqlfMaglpgjqGOmSHeGp0dA==",
+								RefreshToken: "ycbODW-BWbNBGfF7ac4T5RL5ruNm5BChCXgbkY1bWHqMt80JTkLsicQwo8de3tqfqlfMaglpgjqGOmSHeGp0dA==",
 							},
 						}
 					}

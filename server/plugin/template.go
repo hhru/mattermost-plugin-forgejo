@@ -117,7 +117,7 @@ func init() {
 		return commit.Committer
 	}
 
-	funcMap["workflowJobFailedStep"] = func(steps []*github.TaskStep) string {
+	funcMap["workflowJobFailedStep"] = func(steps []*FTaskStep) string {
 		for _, step := range steps {
 			if step.GetConclusion() == workflowJobFail {
 				return step.GetName()

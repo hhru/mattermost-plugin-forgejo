@@ -1522,7 +1522,7 @@ func TestGitHubUsernameRegex(t *testing.T) {
 func TestWorkflowJobNotification(t *testing.T) {
 	t.Run("failed", func(t *testing.T) {
 		expected := `
-[\[mattermost-plugin-github\]](https://github.com/mattermost/mattermost-plugin-github) mock-workflow-name workflow failed (triggered by [panda](https://github.com/panda))
+[\[mattermost-plugin-forgejo\]](https://github.com/mattermost/mattermost-plugin-github) mock-workflow-name workflow failed (triggered by [panda](https://github.com/panda))
 Job failed: [mock-workflow-job](https://github.com/mattermost/mattermost-plugin-github/actions/runs/12345/job/67890)
 Step failed: mock-job-2
 Commit: https://github.com/mattermost/mattermost-plugin-github/commit/1234567890`
@@ -1559,7 +1559,7 @@ Commit: https://github.com/mattermost/mattermost-plugin-github/commit/1234567890
 
 	t.Run("success", func(t *testing.T) {
 		expected := `
-[\[mattermost-plugin-github\]](https://github.com/mattermost/mattermost-plugin-github) mock-workflow-name workflow succeeded (triggered by [panda](https://github.com/panda))
+[\[mattermost-plugin-forgejo\]](https://github.com/mattermost/mattermost-plugin-github) mock-workflow-name workflow succeeded (triggered by [panda](https://github.com/panda))
 Commit: https://github.com/mattermost/mattermost-plugin-github/commit/1234567890`
 
 		actual, err := renderTemplate("newWorkflowJob", &github.WorkflowJobEvent{

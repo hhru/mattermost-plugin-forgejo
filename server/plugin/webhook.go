@@ -29,10 +29,10 @@ const (
 	actionLabeled              = "labeled"
 	actionAssigned             = "assigned"
 
-	actionReviewed = "reviewed"
-	actionCreated  = "created"
-	actionDeleted  = "deleted"
-	actionEdited   = "edited"
+	actionReviewed  = "reviewed"
+	actionCreated   = "created"
+	actionDeleted   = "deleted"
+	actionEdited    = "edited"
 	actionCompleted = "completed"
 
 	workflowJobFail    = "failure"
@@ -1408,7 +1408,7 @@ func (p *Plugin) postWorkflowJobEvent(event *github.WorkflowJobEvent) {
 	}
 
 	repo := event.GetRepo()
-	subs := p.GetSubscribedChannelsForRepository(repo)
+	subs := p.GetSubscribedChannelsForRepository(repo.GetFullName(), repo.GetPrivate())
 
 	if len(subs) == 0 {
 		return

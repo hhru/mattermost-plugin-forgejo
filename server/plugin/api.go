@@ -64,10 +64,11 @@ type FilteredNotification struct {
 }
 
 type SidebarContent struct {
-	PRs         []*graphql.GithubPRDetails `json:"prs"`
-	Reviews     []*graphql.GithubPRDetails `json:"reviews"`
-	Assignments []*github.Issue            `json:"assignments"`
-	Unreads     []*FilteredNotification    `json:"unreads"`
+	// TODO: get additions/deletitions data about pr content from api/v1/repos/{owner}/{repo}/pulls/{id}
+	PRs         []*github.Issue         `json:"prs"`
+	Reviews     []*github.Issue         `json:"reviews"`
+	Assignments []*github.Issue         `json:"assignments"`
+	Unreads     []*FilteredNotification `json:"unreads"`
 }
 
 type Context struct {
@@ -273,6 +274,8 @@ type FLabel struct {
 	Name  *string `json:"name,omitempty"`
 	Color *string `json:"color,omitempty"`
 }
+
+type FTaskStep = github.TaskStep
 
 func (p *Plugin) writeJSON(w http.ResponseWriter, v interface{}) {
 	b, err := json.Marshal(v)

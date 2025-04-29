@@ -124,14 +124,14 @@
     overflow: hidden;
 }
 
-.github-tooltip .opened-by {
+.forgejo-tooltip .opened-by {
     font-size: 12px;
     color: var(--light-gray);
     margin-top: 4px;
     line-height: 1.25;
 }
 
-.github-tooltip .opened-by a {
+.forgejo-tooltip .opened-by a {
     color: var(--dark-gray);
     display: inline-block;
 }
