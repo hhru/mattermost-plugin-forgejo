@@ -84,8 +84,8 @@ type Plugin struct {
 
 	CommandHandlers map[string]CommandHandleFunc
 
-	// githubPermalinkRegex is used to parse github permalinks in post messages.
-	githubPermalinkRegex *regexp.Regexp
+	// forgejoPermalinkRegex is used to parse github permalinks in post messages.
+	forgejoPermalinkRegex *regexp.Regexp
 
 	webhookBroker *WebhookBroker
 	oauthBroker   *OAuthBroker
@@ -96,7 +96,7 @@ type Plugin struct {
 // NewPlugin returns an instance of a Plugin.
 func NewPlugin() *Plugin {
 	p := &Plugin{
-		githubPermalinkRegex: regexp.MustCompile(`https?://(?P<haswww>www\.)?src\.pyn\.ru/(?P<user>[\w-]+)/(?P<repo>[\w-.]+)/blob/(?P<commit>[\w-]+)/(?P<path>[\w-/.]+)#(?P<line>[\w-]+)?`),
+		forgejoPermalinkRegex: regexp.MustCompile(`https?://(?P<haswww>www\.)?forgejo\.pyn\.ru/(?P<user>[\w-]+)/(?P<repo>[\w-.]+)/blob/(?P<commit>[\w-]+)/(?P<path>[\w-/.]+)#(?P<line>[\w-]+)?`),
 	}
 
 	p.CommandHandlers = map[string]CommandHandleFunc{

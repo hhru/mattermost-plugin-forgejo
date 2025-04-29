@@ -39,7 +39,7 @@ func init() {
 
 	// Try to parse out email footer junk
 	funcMap["trimBody"] = func(body string) string {
-		if strings.Contains(body, "notifications@forgejo.com") {
+		if strings.Contains(body, "notifications@forgejo.pyn.ru") {
 			return strings.Split(body, "\n\nOn")[0]
 		}
 

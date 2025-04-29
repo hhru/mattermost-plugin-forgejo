@@ -26,13 +26,14 @@ func TestGetReplacements(t *testing.T) {
 		replacements    []replacement
 	}{
 		{
-			name:            "basic one link",
-			input:           "start https://github.com/mattermost/mattermost-server/blob/cbb25838a61872b624ac512556d7bc932486a64c/app/authentication.go#L15-L22 lorem ipsum",
+			name: "basic one link",
+			// forgejo stubs with not existed content
+			input:           "start https://forgejo.pyn.ru/mattermost/mattermost-server/blob/cbb25838a61872b624ac512556d7bc932486a64c/app/authentication.go#L15-L22 lorem ipsum",
 			numReplacements: 1,
 			replacements: []replacement{
 				{
 					index: 6,
-					word:  "https://github.com/mattermost/mattermost-server/blob/cbb25838a61872b624ac512556d7bc932486a64c/app/authentication.go#L15-L22",
+					word:  "https://forgejo.pyn.ru/mattermost/mattermost-server/blob/cbb25838a61872b624ac512556d7bc932486a64c/app/authentication.go#L15-L22",
 					permalinkInfo: struct {
 						haswww string
 						commit string
@@ -53,12 +54,12 @@ func TestGetReplacements(t *testing.T) {
 		},
 		{
 			name:            "basic link with relative path",
-			input:           "start https://github.com/mattermost/mattermost-server/blob/cbb25838a61872b624ac512556d7bc932486a64c/../../../authentication.go#L15-L22 lorem ipsum",
+			input:           "start https://forgejo.pyn.ru/mattermost/mattermost-server/blob/cbb25838a61872b624ac512556d7bc932486a64c/../../../authentication.go#L15-L22 lorem ipsum",
 			numReplacements: 1,
 			replacements: []replacement{
 				{
 					index: 6,
-					word:  "https://github.com/mattermost/mattermost-server/blob/cbb25838a61872b624ac512556d7bc932486a64c/../../../authentication.go#L15-L22",
+					word:  "https://forgejo.pyn.ru/mattermost/mattermost-server/blob/cbb25838a61872b624ac512556d7bc932486a64c/../../../authentication.go#L15-L22",
 					permalinkInfo: struct {
 						haswww string
 						commit string
@@ -79,12 +80,12 @@ func TestGetReplacements(t *testing.T) {
 		},
 		{
 			name:            "duplicate expansions",
-			input:           "start https://github.com/mattermost/mattermost-server/blob/cbb25838a61872b624ac512556d7bc932486a64c/app/authentication.go#L15-L22 lorem ipsum https://github.com/mattermost/mattermost-server/blob/cbb25838a61872b624ac512556d7bc932486a64c/app/authentication.go#L15-L22 lorem ipsum",
+			input:           "start https://forgejo.pyn.ru/mattermost/mattermost-server/blob/cbb25838a61872b624ac512556d7bc932486a64c/app/authentication.go#L15-L22 lorem ipsum https://forgejo.pyn.ru/mattermost/mattermost-server/blob/cbb25838a61872b624ac512556d7bc932486a64c/app/authentication.go#L15-L22 lorem ipsum",
 			numReplacements: 2,
 			replacements: []replacement{
 				{
 					index: 6,
-					word:  "https://github.com/mattermost/mattermost-server/blob/cbb25838a61872b624ac512556d7bc932486a64c/app/authentication.go#L15-L22",
+					word:  "https://forgejo.pyn.ru/mattermost/mattermost-server/blob/cbb25838a61872b624ac512556d7bc932486a64c/app/authentication.go#L15-L22",
 					permalinkInfo: struct {
 						haswww string
 						commit string
@@ -101,8 +102,8 @@ func TestGetReplacements(t *testing.T) {
 						repo:   "mattermost-server",
 					},
 				}, {
-					index: 142,
-					word:  "https://github.com/mattermost/mattermost-server/blob/cbb25838a61872b624ac512556d7bc932486a64c/app/authentication.go#L15-L22",
+					index: 146,
+					word:  "https://forgejo.pyn.ru/mattermost/mattermost-server/blob/cbb25838a61872b624ac512556d7bc932486a64c/app/authentication.go#L15-L22",
 					permalinkInfo: struct {
 						haswww string
 						commit string
@@ -122,17 +123,17 @@ func TestGetReplacements(t *testing.T) {
 			},
 		}, {
 			name:            "inside link",
-			input:           "should not expand [link](https://github.com/mattermost/mattermost-server/blob/cbb25838a61872b624ac512556d7bc932486a64c/app/authentication.go#L15-L22) here",
+			input:           "should not expand [link](https://forgejo.pyn.ru/mattermost/mattermost-server/blob/cbb25838a61872b624ac512556d7bc932486a64c/app/authentication.go#L15-L22) here",
 			numReplacements: 0,
 			replacements:    []replacement{},
 		}, {
 			name:            "one link, one expansion",
-			input:           "first should not expand [link](https://github.com/mattermost/mattermost-server/blob/cbb25838a61872b624ac512556d7bc932486a64c/app/authentication.go#L15-L22) this should https://github.com/mattermost/mattermost-server/blob/cbb25838a61872b624ac512556d7bc932486a64c/app/authentication.go#L15-L22 lorem ipsum",
+			input:           "first should not expand [link](https://forgejo.pyn.ru/mattermost/mattermost-server/blob/cbb25838a61872b624ac512556d7bc932486a64c/app/authentication.go#L15-L22) this should https://forgejo.pyn.ru/mattermost/mattermost-server/blob/cbb25838a61872b624ac512556d7bc932486a64c/app/authentication.go#L15-L22 lorem ipsum",
 			numReplacements: 1,
 			replacements: []replacement{
 				{
-					index: 168,
-					word:  "https://github.com/mattermost/mattermost-server/blob/cbb25838a61872b624ac512556d7bc932486a64c/app/authentication.go#L15-L22",
+					index: 172,
+					word:  "https://forgejo.pyn.ru/mattermost/mattermost-server/blob/cbb25838a61872b624ac512556d7bc932486a64c/app/authentication.go#L15-L22",
 					permalinkInfo: struct {
 						haswww string
 						commit string
@@ -152,12 +153,12 @@ func TestGetReplacements(t *testing.T) {
 			},
 		}, {
 			name:            "one expansion, one link",
-			input:           "first should expand https://github.com/mattermost/mattermost-server/blob/cbb25838a61872b624ac512556d7bc932486a64c/app/authentication.go#L15-L22 lorem ipsum , this should not [link](https://github.com/mattermost/mattermost-server/blob/cbb25838a61872b624ac512556d7bc932486a64c/app/authentication.go#L15-L22)",
+			input:           "first should expand https://forgejo.pyn.ru/mattermost/mattermost-server/blob/cbb25838a61872b624ac512556d7bc932486a64c/app/authentication.go#L15-L22 lorem ipsum , this should not [link](https://forgejo.pyn.ru/mattermost/mattermost-server/blob/cbb25838a61872b624ac512556d7bc932486a64c/app/authentication.go#L15-L22)",
 			numReplacements: 1,
 			replacements: []replacement{
 				{
 					index: 20,
-					word:  "https://github.com/mattermost/mattermost-server/blob/cbb25838a61872b624ac512556d7bc932486a64c/app/authentication.go#L15-L22",
+					word:  "https://forgejo.pyn.ru/mattermost/mattermost-server/blob/cbb25838a61872b624ac512556d7bc932486a64c/app/authentication.go#L15-L22",
 					permalinkInfo: struct {
 						haswww string
 						commit string
@@ -177,17 +178,17 @@ func TestGetReplacements(t *testing.T) {
 			},
 		}, {
 			name:            "2 links",
-			input:           "both should not expand- [link](https://github.com/mattermost/mattermost-server/blob/cbb25838a61872b624ac512556d7bc932486a64c/app/authentication.go#L15-L22) and [link](https://github.com/mattermost/mattermost-server/blob/cbb25838a61872b624ac512556d7bc932486a64c/app/authentication.go#L15-L22)",
+			input:           "both should not expand- [link](https://forgejo.pyn.ru/mattermost/mattermost-server/blob/cbb25838a61872b624ac512556d7bc932486a64c/app/authentication.go#L15-L22) and [link](https://forgejo.pyn.ru/mattermost/mattermost-server/blob/cbb25838a61872b624ac512556d7bc932486a64c/app/authentication.go#L15-L22)",
 			numReplacements: 0,
 			replacements:    []replacement{},
 		}, {
 			name:            "multiple expansions",
-			input:           "multiple - https://github.com/golang/go/blob/27fc32ff01cc699e160890546816bd99d6c57823/src/debug/macho/macho.go#L13-L16 second https://github.com/mattermost/mattermost-server/blob/cbb25838a61872b624ac512556d7bc932486a64c/app/authentication.go#L15-L22",
+			input:           "multiple - https://forgejo.pyn.ru/golang/go/blob/27fc32ff01cc699e160890546816bd99d6c57823/src/debug/macho/macho.go#L13-L16 second https://forgejo.pyn.ru/mattermost/mattermost-server/blob/cbb25838a61872b624ac512556d7bc932486a64c/app/authentication.go#L15-L22",
 			numReplacements: 2,
 			replacements: []replacement{
 				{
 					index: 11,
-					word:  "https://github.com/golang/go/blob/27fc32ff01cc699e160890546816bd99d6c57823/src/debug/macho/macho.go#L13-L16",
+					word:  "https://forgejo.pyn.ru/golang/go/blob/27fc32ff01cc699e160890546816bd99d6c57823/src/debug/macho/macho.go#L13-L16",
 					permalinkInfo: struct {
 						haswww string
 						commit string
@@ -204,8 +205,8 @@ func TestGetReplacements(t *testing.T) {
 						repo:   "go",
 					},
 				}, {
-					index: 126,
-					word:  "https://github.com/mattermost/mattermost-server/blob/cbb25838a61872b624ac512556d7bc932486a64c/app/authentication.go#L15-L22",
+					index: 130,
+					word:  "https://forgejo.pyn.ru/mattermost/mattermost-server/blob/cbb25838a61872b624ac512556d7bc932486a64c/app/authentication.go#L15-L22",
 					permalinkInfo: struct {
 						haswww string
 						commit string
@@ -225,12 +226,12 @@ func TestGetReplacements(t *testing.T) {
 			},
 		}, {
 			name:            "single line",
-			input:           "this is a one line permalink https://github.com/mattermost/mattermost-server/blob/4225977966cf0855c8a5e55f8a0fef702b19dc18/api4/bot.go#L16",
+			input:           "this is a one line permalink https://forgejo.pyn.ru/mattermost/mattermost-server/blob/4225977966cf0855c8a5e55f8a0fef702b19dc18/api4/bot.go#L16",
 			numReplacements: 1,
 			replacements: []replacement{
 				{
 					index: 29,
-					word:  "https://github.com/mattermost/mattermost-server/blob/4225977966cf0855c8a5e55f8a0fef702b19dc18/api4/bot.go#L16",
+					word:  "https://forgejo.pyn.ru/mattermost/mattermost-server/blob/4225977966cf0855c8a5e55f8a0fef702b19dc18/api4/bot.go#L16",
 					permalinkInfo: struct {
 						haswww string
 						commit string
