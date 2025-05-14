@@ -64,6 +64,7 @@ type FilteredNotification struct {
 }
 
 type SidebarContent struct {
+	// TODO: get additions/deletitions data about pr content from api/v1/repos/{owner}/{repo}/pulls/{id}
 	PRs         []*github.Issue         `json:"prs"`
 	Reviews     []*github.Issue         `json:"reviews"`
 	Assignments []*github.Issue         `json:"assignments"`
@@ -153,10 +154,11 @@ type FIssueComment struct {
 }
 
 type FPullRequestReviewCommentEvent struct {
-	Action      *string       `json:"action,omitempty"`
-	PullRequest *FPullRequest `json:"pull_request,omitempty"`
-	Repo        *FRepository  `json:"repository,omitempty"`
-	Sender      *FUser        `json:"sender,omitempty"`
+	Action      *string             `json:"action,omitempty"`
+	PullRequest *FPullRequest       `json:"pull_request,omitempty"`
+	Repo        *FRepository        `json:"repository,omitempty"`
+	Sender      *FUser              `json:"sender,omitempty"`
+	Review      *FPullRequestReview `json:"review,omitempty"`
 }
 
 type FPullRequestReviewEvent struct {
@@ -208,6 +210,13 @@ func (p *FPullRequestReview) GetType() string {
 		return ""
 	}
 	return *p.Type
+}
+
+func (p *FPullRequestReview) GetContent() string {
+	if p == nil || p.Content == nil {
+		return ""
+	}
+	return *p.Content
 }
 
 type FPullRequest struct {
@@ -273,6 +282,8 @@ type FLabel struct {
 	Name  *string `json:"name,omitempty"`
 	Color *string `json:"color,omitempty"`
 }
+
+type FTaskStep = github.TaskStep
 
 func (p *Plugin) writeJSON(w http.ResponseWriter, v interface{}) {
 	b, err := json.Marshal(v)

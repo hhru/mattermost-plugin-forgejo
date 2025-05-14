@@ -53,18 +53,19 @@ var (
 	testOAuthServerURL = ""
 )
 
-type kvStore interface {
+type KvStore interface {
 	Set(key string, value any, options ...pluginapi.KVSetOption) (bool, error)
 	ListKeys(page int, count int, options ...pluginapi.ListKeysOption) ([]string, error)
 	Get(key string, o any) error
 	Delete(key string) error
+	SetAtomicWithRetries(key string, valueFunc func(oldValue []byte) (newValue interface{}, err error)) error
 }
 
 type Plugin struct {
 	plugin.MattermostPlugin
 	client *pluginapi.Client
 
-	store kvStore
+	store KvStore
 
 	// configurationLock synchronizes access to the configuration.
 	configurationLock sync.RWMutex
@@ -84,8 +85,8 @@ type Plugin struct {
 
 	CommandHandlers map[string]CommandHandleFunc
 
-	// githubPermalinkRegex is used to parse github permalinks in post messages.
-	githubPermalinkRegex *regexp.Regexp
+	// forgejoPermalinkRegex is used to parse github permalinks in post messages.
+	forgejoPermalinkRegex *regexp.Regexp
 
 	webhookBroker *WebhookBroker
 	oauthBroker   *OAuthBroker
@@ -96,7 +97,7 @@ type Plugin struct {
 // NewPlugin returns an instance of a Plugin.
 func NewPlugin() *Plugin {
 	p := &Plugin{
-		githubPermalinkRegex: regexp.MustCompile(`https?://(?P<haswww>www\.)?src\.pyn\.ru/(?P<user>[\w-]+)/(?P<repo>[\w-.]+)/blob/(?P<commit>[\w-]+)/(?P<path>[\w-/.]+)#(?P<line>[\w-]+)?`),
+		forgejoPermalinkRegex: regexp.MustCompile(`https?://(?P<haswww>www\.)?forgejo\.pyn\.ru/(?P<user>[\w-]+)/(?P<repo>[\w-.]+)/blob/(?P<commit>[\w-]+)/(?P<path>[\w-/.]+)#(?P<line>[\w-]+)?`),
 	}
 
 	p.CommandHandlers = map[string]CommandHandleFunc{
@@ -157,7 +158,7 @@ func (p *Plugin) GetGitHubClient(ctx context.Context, userID string) (*github.Cl
 	return p.githubConnectUser(ctx, userInfo), nil
 }
 
-func (p *Plugin) githubConnectUser(ctx context.Context, info *ForgejoUserInfo) *github.Client {
+func (p *Plugin) githubConnectUser(_ context.Context, info *ForgejoUserInfo) *github.Client {
 	tok := *info.Token
 	return p.githubConnectToken(tok)
 }

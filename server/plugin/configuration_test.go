@@ -14,12 +14,6 @@ func TestIsValid(t *testing.T) {
 		errMsg      string
 	}{
 		{
-			description: "valid configuration: pre-registered app",
-			config: &Configuration{
-				EncryptionKey: "abcd",
-			},
-		},
-		{
 			description: "valid configuration: custom OAuth app",
 			config: &Configuration{
 				ForgejoOAuthClientID:     "client-id",
@@ -35,12 +29,12 @@ func TestIsValid(t *testing.T) {
 			errMsg: "must have a forgejo oauth client id",
 		},
 		{
-			description: "invalid configuration: Forgejo URL with pre-registered app",
+			description: "invalid configuration: custom OAuth app without credentials",
 			config: &Configuration{
-				BaseURL:       "https://my-company.forgejo.com",
-				EncryptionKey: "abcd",
+				EncryptionKey:        "abcd",
+				ForgejoOAuthClientID: "client-id",
 			},
-			errMsg: "cannot use pre-registered application with Forgejo",
+			errMsg: "must have a forgejo oauth client secret",
 		},
 	} {
 		t.Run(testCase.description, func(t *testing.T) {

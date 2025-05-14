@@ -42,8 +42,8 @@ type replacement struct {
 // on a message. The returned slice is sorted by the index in ascending order.
 func (p *Plugin) getReplacements(msg string) []replacement {
 	// find the permalinks from the msg using a regex
-	matches := p.githubPermalinkRegex.FindAllStringSubmatch(msg, -1)
-	indices := p.githubPermalinkRegex.FindAllStringIndex(msg, -1)
+	matches := p.forgejoPermalinkRegex.FindAllStringSubmatch(msg, -1)
+	indices := p.forgejoPermalinkRegex.FindAllStringIndex(msg, -1)
 	var replacements []replacement
 	for i, m := range matches {
 		// have a limit on the number of replacements to do
@@ -61,7 +61,7 @@ func (p *Plugin) getReplacements(msg string) []replacement {
 			continue
 		}
 		// populate the permalinkInfo with the extracted groups of the regex
-		for j, name := range p.githubPermalinkRegex.SubexpNames() {
+		for j, name := range p.forgejoPermalinkRegex.SubexpNames() {
 			if j == 0 {
 				continue
 			}
