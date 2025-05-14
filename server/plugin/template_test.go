@@ -959,28 +959,6 @@ Excited to see git-get-head land!
 		require.Equal(t, expected, actual)
 	})
 
-	t.Run("commented", func(t *testing.T) {
-		// TODO: check pr comment event in forgejo api. It is issueComment or pullRequestReviewComment now ?
-		t.SkipNow()
-		expected := `
-[\[mattermost-plugin-forgejo\]](https://github.com/mattermost/mattermost-plugin-github) [panda](https://github.com/panda) commented on [#42 Leverage git-get-head](https://github.com/mattermost/mattermost-plugin-github/pull/42):
-
-Excited to see git-get-head land!
-`
-
-		actual, err := renderTemplate("pullRequestReviewEvent", &github.PullRequestReviewEvent{
-			Repo:        &repo,
-			PullRequest: &pullRequest,
-			Sender:      &user,
-			Review: &github.PullRequestReview{
-				State: sToP("commented"),
-				Body:  sToP("Excited to see git-get-head land!"),
-			},
-		})
-		require.NoError(t, err)
-		require.Equal(t, expected, actual)
-	})
-
 	t.Run("requested changes", func(t *testing.T) {
 		// TODO: check pr requqested changes event in forgejo api. It is issueComment or pullRequestReviewComment now ?
 		t.SkipNow()
@@ -1026,8 +1004,6 @@ Excited to see git-get-head land!
 }
 
 func TestPullRequestReviewCommentEventTemplate(t *testing.T) {
-	// TODO: check new review comment event in forgejo api. Comment != pullRequest.body -> it is pr description. Bug?
-	t.SkipNow()
 	t.Run("without mentions", func(*testing.T) {
 
 		expected := `
@@ -1039,9 +1015,10 @@ Should this be here?
 		actual, err := renderTemplate("newReviewComment", &FPullRequestReviewCommentEvent{
 			Repo:        &fRepo,
 			PullRequest: &fPullRequest,
-			//Comment: &github.PullRequestComment{
-			//	Body: sToP("Should this be here?"),
-			//},
+			Review: &FPullRequestReview{
+				Type:    sToP("pull_request_review_comment"),
+				Content: sToP("Should this be here?"),
+			},
 			Sender: &fUser,
 		})
 		require.NoError(t, err)
@@ -1056,13 +1033,14 @@ Should this be here?
 ` + usernameMentions + `
 `
 
-		actual, err := renderTemplate("newReviewComment", &github.PullRequestReviewCommentEvent{
-			Repo:        &repo,
-			PullRequest: &pullRequest,
-			Comment: &github.PullRequestComment{
-				Body: sToP("Should this be here?\n" + gitHubMentions),
+		actual, err := renderTemplate("newReviewComment", &FPullRequestReviewCommentEvent{
+			Repo:        &fRepo,
+			PullRequest: &fPullRequest,
+			Review: &FPullRequestReview{
+				Type:    sToP("pull_request_review_comment"),
+				Content: sToP("Should this be here?\n" + gitHubMentions),
 			},
-			Sender: &user,
+			Sender: &fUser,
 		})
 		require.NoError(t, err)
 		require.Equal(t, expected, actual)

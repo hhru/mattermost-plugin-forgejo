@@ -375,7 +375,7 @@ Assignees: {{range $i, $el := .Assignees -}} {{- if $i}}, {{end}}{{template "FUs
 	template.Must(masterTemplate.New("newReviewComment").Funcs(funcMap).Parse(`
 {{template "FRepo" .Repo}} New review comment by {{template "FUser" .Sender}} on {{template "FPullRequest" .PullRequest}}:
 
-{{.PullRequest.Body | trimBody | replaceAllForgejoUsernames}}
+{{.Review.Content | trimBody | replaceAllForgejoUsernames}}
 `))
 
 	template.Must(masterTemplate.New("commentMentionNotification").Funcs(funcMap).Parse(`

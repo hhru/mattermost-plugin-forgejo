@@ -154,10 +154,11 @@ type FIssueComment struct {
 }
 
 type FPullRequestReviewCommentEvent struct {
-	Action      *string       `json:"action,omitempty"`
-	PullRequest *FPullRequest `json:"pull_request,omitempty"`
-	Repo        *FRepository  `json:"repository,omitempty"`
-	Sender      *FUser        `json:"sender,omitempty"`
+	Action      *string             `json:"action,omitempty"`
+	PullRequest *FPullRequest       `json:"pull_request,omitempty"`
+	Repo        *FRepository        `json:"repository,omitempty"`
+	Sender      *FUser              `json:"sender,omitempty"`
+	Review      *FPullRequestReview `json:"review,omitempty"`
 }
 
 type FPullRequestReviewEvent struct {
