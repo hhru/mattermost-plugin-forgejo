@@ -1315,13 +1315,10 @@ func TestIssueNotification(t *testing.T) {
 }
 
 func TestPullRequestReviewNotification(t *testing.T) {
-	//TODO check where is HTMLURL in FPullRequestReview and actions type "commented,changes_requested"
-	t.SkipNow()
-
 	t.Run("approved", func(t *testing.T) {
 
 		expected := `
-[panda](https://github.com/panda) approved your pull request [mattermost-plugin-forgejo#42](https://github.com/mattermost/mattermost-plugin-github/pull/42#issuecomment-123456) - Leverage git-get-head
+[panda](https://github.com/panda) approved your pull request [mattermost-plugin-forgejo#42](https://github.com/mattermost/mattermost-plugin-github/pull/42) - Leverage git-get-head
 >Excited to see git-get-head land!
 `
 
@@ -1333,11 +1330,6 @@ func TestPullRequestReviewNotification(t *testing.T) {
 				Type:    sToP("pull_request_review_approved"),
 				Content: sToP("Excited to see git-get-head land!"),
 			},
-			//Review: &github.PullRequestReview{
-			//	HTMLURL: sToP("https://github.com/mattermost/mattermost-plugin-github/pull/42#issuecomment-123456"),
-			//	State:   sToP("approved"),
-			//	Body:    sToP("Excited to see git-get-head land!"),
-			//},
 		})
 		require.NoError(t, err)
 		require.Equal(t, expected, actual)
@@ -1345,58 +1337,37 @@ func TestPullRequestReviewNotification(t *testing.T) {
 
 	t.Run("changes_requested", func(t *testing.T) {
 		expected := `
-[panda](https://github.com/panda) requested changes on your pull request [mattermost-plugin-forgejo#42](https://github.com/mattermost/mattermost-plugin-github/pull/42#issuecomment-123456) - Leverage git-get-head
+[panda](https://github.com/panda) requested changes on your pull request [mattermost-plugin-forgejo#42](https://github.com/mattermost/mattermost-plugin-github/pull/42) - Leverage git-get-head
 >Excited to see git-get-head land!
 `
 
-		actual, err := renderTemplate("pullRequestReviewNotification", &github.PullRequestReviewEvent{
-			Repo:        &repo,
-			PullRequest: &pullRequest,
-			Sender:      &user,
-			Review: &github.PullRequestReview{
-				HTMLURL: sToP("https://github.com/mattermost/mattermost-plugin-github/pull/42#issuecomment-123456"),
-				State:   sToP("changes_requested"),
-				Body:    sToP("Excited to see git-get-head land!"),
+		actual, err := renderTemplate("pullRequestReviewNotification", &FPullRequestReviewEvent{
+			Repo:        &fRepo,
+			PullRequest: &fPullRequest,
+			Sender:      &fUser,
+			Review: &FPullRequestReview{
+				Type:    sToP("pull_request_review_rejected"),
+				Content: sToP("Excited to see git-get-head land!"),
 			},
 		})
 		require.NoError(t, err)
 		require.Equal(t, expected, actual)
 	})
 
-	t.Run("commented", func(t *testing.T) {
-		expected := `
-[panda](https://github.com/panda) commented on your pull request [mattermost-plugin-forgejo#42](https://github.com/mattermost/mattermost-plugin-github/pull/42#issuecomment-123456) - Leverage git-get-head
->Excited to see git-get-head land!
-`
-
-		actual, err := renderTemplate("pullRequestReviewNotification", &github.PullRequestReviewEvent{
-			Repo:        &repo,
-			PullRequest: &pullRequest,
-			Sender:      &user,
-			Review: &github.PullRequestReview{
-				HTMLURL: sToP("https://github.com/mattermost/mattermost-plugin-github/pull/42#issuecomment-123456"),
-				State:   sToP("commented"),
-				Body:    sToP("Excited to see git-get-head land!"),
-			},
-		})
-		require.NoError(t, err)
-		require.Equal(t, expected, actual)
-	})
 	t.Run("approved with mentions", withGitHubUserNameMapping(func(t *testing.T) {
 		expected := `
-@pandabot approved your pull request [mattermost-plugin-forgejo#42](https://github.com/mattermost/mattermost-plugin-github/pull/42#issuecomment-123456) - Leverage git-get-head
+@pandabot approved your pull request [mattermost-plugin-forgejo#42](https://github.com/mattermost/mattermost-plugin-github/pull/42) - Leverage git-get-head
 >Excited to see git-get-head land!
 >` + usernameMentions + `
 `
 
-		actual, err := renderTemplate("pullRequestReviewNotification", &github.PullRequestReviewEvent{
-			Repo:        &repo,
-			PullRequest: &pullRequest,
-			Sender:      &user,
-			Review: &github.PullRequestReview{
-				HTMLURL: sToP("https://github.com/mattermost/mattermost-plugin-github/pull/42#issuecomment-123456"),
-				State:   sToP("approved"),
-				Body:    sToP("Excited to see git-get-head land!\n" + gitHubMentions),
+		actual, err := renderTemplate("pullRequestReviewNotification", &FPullRequestReviewEvent{
+			Repo:        &fRepo,
+			PullRequest: &fPullRequest,
+			Sender:      &fUser,
+			Review: &FPullRequestReview{
+				Type:    sToP("pull_request_review_approved"),
+				Content: sToP("Excited to see git-get-head land!\n" + gitHubMentions),
 			},
 		})
 		require.NoError(t, err)
@@ -1404,16 +1375,32 @@ func TestPullRequestReviewNotification(t *testing.T) {
 	}))
 	t.Run("review with no body", withGitHubUserNameMapping(func(t *testing.T) {
 		expected := `
-@pandabot approved your pull request [mattermost-plugin-forgejo#42](https://github.com/mattermost/mattermost-plugin-github/pull/42#issuecomment-123456) - Leverage git-get-head
+@pandabot approved your pull request [mattermost-plugin-forgejo#42](https://github.com/mattermost/mattermost-plugin-github/pull/42) - Leverage git-get-head
 `
 
-		actual, err := renderTemplate("pullRequestReviewNotification", &github.PullRequestReviewEvent{
-			Repo:        &repo,
-			PullRequest: &pullRequest,
-			Sender:      &user,
-			Review: &github.PullRequestReview{
-				HTMLURL: sToP("https://github.com/mattermost/mattermost-plugin-github/pull/42#issuecomment-123456"),
-				State:   sToP("approved"),
+		actual, err := renderTemplate("pullRequestReviewNotification", &FPullRequestReviewEvent{
+			Repo:        &fRepo,
+			PullRequest: &fPullRequest,
+			Sender:      &fUser,
+			Review: &FPullRequestReview{
+				Type: sToP("pull_request_review_approved"),
+			},
+		})
+		require.NoError(t, err)
+		require.Equal(t, expected, actual)
+	}))
+	t.Run("review with empty body", withGitHubUserNameMapping(func(t *testing.T) {
+		expected := `
+@pandabot approved your pull request [mattermost-plugin-forgejo#42](https://github.com/mattermost/mattermost-plugin-github/pull/42) - Leverage git-get-head
+`
+
+		actual, err := renderTemplate("pullRequestReviewNotification", &FPullRequestReviewEvent{
+			Repo:        &fRepo,
+			PullRequest: &fPullRequest,
+			Sender:      &fUser,
+			Review: &FPullRequestReview{
+				Type:    sToP("pull_request_review_approved"),
+				Content: sToP(""),
 			},
 		})
 		require.NoError(t, err)

@@ -439,7 +439,7 @@ Assignees: {{range $i, $el := .Assignees -}} {{- if $i}}, {{end}}{{template "FUs
 {{- else if eq .GetReview.GetType "pull_request_review_rejected" }} requested changes on your pull request
 {{- else if eq .GetReview.GetType "commented" }} commented on your pull request
 {{- end }} {{template "reviewRepoPullRequestWithTitle" .}}
-{{if .Review.Content}}{{.Review.Content | trimBody | quote | replaceAllForgejoUsernames}}
+{{if ne .GetReview.GetContent ""}}{{.Review.Content | trimBody | quote | replaceAllForgejoUsernames}}
 {{else}}{{end}}`))
 
 	template.Must(masterTemplate.New("helpText").Parse("" +

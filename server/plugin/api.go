@@ -212,6 +212,13 @@ func (p *FPullRequestReview) GetType() string {
 	return *p.Type
 }
 
+func (p *FPullRequestReview) GetContent() string {
+	if p == nil || p.Content == nil {
+		return ""
+	}
+	return *p.Content
+}
+
 type FPullRequest struct {
 	ID        *int      `json:"id,omitempty"`
 	Labels    []*FLabel `json:"labels,omitempty"`
