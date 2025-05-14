@@ -650,9 +650,7 @@ func TestPushedCommitsTemplate(t *testing.T) {
 		event := FPushEvent{
 			Repo:   &fRepo,
 			Sender: &fUser,
-			//Forced: bToP(false),
-			// in if {{ .Forced }} bTop(false) == true, because it is pointer
-			// TODO check this field in real hook event
+			// Forgejo don't send forced field
 			Forced: nil,
 			Commits: []*FHeadCommit{
 				{
