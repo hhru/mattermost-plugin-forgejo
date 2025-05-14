@@ -960,21 +960,19 @@ Excited to see git-get-head land!
 	})
 
 	t.Run("requested changes", func(t *testing.T) {
-		// TODO: check pr requqested changes event in forgejo api. It is issueComment or pullRequestReviewComment now ?
-		t.SkipNow()
 		expected := `
 [\[mattermost-plugin-forgejo\]](https://github.com/mattermost/mattermost-plugin-github) [panda](https://github.com/panda) requested changes on [#42 Leverage git-get-head](https://github.com/mattermost/mattermost-plugin-github/pull/42):
 
 Excited to see git-get-head land!
 `
 
-		actual, err := renderTemplate("pullRequestReviewEvent", &github.PullRequestReviewEvent{
-			Repo:        &repo,
-			PullRequest: &pullRequest,
-			Sender:      &user,
-			Review: &github.PullRequestReview{
-				State: sToP("changes_requested"),
-				Body:  sToP("Excited to see git-get-head land!"),
+		actual, err := renderTemplate("pullRequestReviewEvent", &FPullRequestReviewEvent{
+			Repo:        &fRepo,
+			PullRequest: &fPullRequest,
+			Sender:      &fUser,
+			Review: &FPullRequestReview{
+				Type:    sToP("pull_request_review_rejected"),
+				Content: sToP("Excited to see git-get-head land!"),
 			},
 		})
 		require.NoError(t, err)
