@@ -15,3 +15,5 @@ server/plugin/manifest.go
 
 # VS Code
 .vscode
+
+dev/.env
