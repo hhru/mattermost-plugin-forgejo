@@ -3,6 +3,7 @@ package plugin
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strings"
 	"unicode"
 
@@ -336,14 +337,15 @@ func (p *Plugin) createPost(channelID, userID, message string) error {
 	return nil
 }
 
-func (p *Plugin) checkIfConfiguredWebhookExists(ctx context.Context, githubClient *github.Client, repo, owner string) (bool, error) {
+func (p *Plugin) checkIfConfiguredWebhookExists(ctx context.Context, githubClient *github.Client, repo, owner string) (bool, int, error) {
+	const undefinedResponseStatusCode = -1
 	found := false
 	opt := &github.ListOptions{
 		PerPage: PerPageValue,
 	}
 	siteURL, err := getSiteURL(p.client)
 	if err != nil {
-		return false, err
+		return false, undefinedResponseStatusCode, err
 	}
 
 	for {
@@ -359,7 +361,11 @@ func (p *Plugin) checkIfConfiguredWebhookExists(ctx context.Context, githubClien
 
 		if err != nil {
 			p.client.Log.Warn("Not able to get the list of webhooks", "Owner", owner, "Repo", repo, "error", err.Error())
-			return found, err
+			var errResponse *github.ErrorResponse
+			if errors.As(err, &errResponse) && errResponse.Response != nil {
+				return found, errResponse.Response.StatusCode, err
+			}
+			return found, undefinedResponseStatusCode, err
 		}
 
 		for _, hook := range githubHooks {
@@ -375,7 +381,7 @@ func (p *Plugin) checkIfConfiguredWebhookExists(ctx context.Context, githubClien
 		opt.Page = githubResponse.NextPage
 	}
 
-	return found, nil
+	return found, http.StatusOK, nil
 }
 
 func (p *Plugin) handleSubscribesAdd(_ *plugin.Context, args *model.CommandArgs, parameters []string, userInfo *ForgejoUserInfo) string {
@@ -468,9 +474,9 @@ func (p *Plugin) handleSubscribesAdd(_ *plugin.Context, args *model.CommandArgs,
 
 		subOrgMsg := fmt.Sprintf("Successfully subscribed to organization %s.", owner)
 
-		found, foundErr := p.checkIfConfiguredWebhookExists(ctx, githubClient, repo, owner)
+		found, responseCode, foundErr := p.checkIfConfiguredWebhookExists(ctx, githubClient, repo, owner)
 		if foundErr != nil {
-			if strings.Contains(foundErr.Error(), "404 Not Found") {
+			if responseCode == http.StatusNotFound || responseCode == http.StatusForbidden {
 				// We are not returning an error here and just a subscription success message, as the above error condition occurs when the user is not authorized to access webhooks.
 				return ""
 			}
@@ -508,9 +514,9 @@ func (p *Plugin) handleSubscribesAdd(_ *plugin.Context, args *model.CommandArgs,
 		return fmt.Sprintf("%s\nError creating the public post: %s", msg, err.Error())
 	}
 
-	found, err := p.checkIfConfiguredWebhookExists(ctx, githubClient, repo, owner)
+	found, responseCode, err := p.checkIfConfiguredWebhookExists(ctx, githubClient, repo, owner)
 	if err != nil {
-		if strings.Contains(err.Error(), "404 Not Found") {
+		if responseCode == http.StatusNotFound || responseCode == http.StatusForbidden {
 			// We are not returning an error here and just a subscription success message, as the above error condition occurs when the user is not authorized to access webhooks.
 			return ""
 		}
