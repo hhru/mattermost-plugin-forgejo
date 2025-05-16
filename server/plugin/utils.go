@@ -104,27 +104,52 @@ func parseForgejoUsernamesFromText(text string) []string {
 	usernames := []string{}
 
 	for _, word := range strings.FieldsFunc(text, func(c rune) bool {
-		return !(c == '-' || c == '@' || unicode.IsLetter(c) || unicode.IsNumber(c))
+		return !(c == '-' || c == '@' || c == '.' || unicode.IsLetter(c) || unicode.IsNumber(c))
 	}) {
+		// Trim leading non-@, non-alnum, non-hyphen, non-dot chars
+		for len(word) > 0 && word[0] != '@' {
+			word = word[1:]
+		}
+		// Trim trailing non-alnum, non-hyphen, non-dot chars
+		for len(word) > 0 && !(unicode.IsLetter(rune(word[len(word)-1])) || unicode.IsNumber(rune(word[len(word)-1])) || word[len(word)-1] == '-' || word[len(word)-1] == '.') {
+			word = word[:len(word)-1]
+		}
+
 		if len(word) < 2 || word[0] != '@' {
 			continue
 		}
 
-		if word[1] == '-' || word[len(word)-1] == '-' {
-			continue
-		}
-
-		if strings.Contains(word, "--") {
-			continue
-		}
-
 		name := word[1:]
+		// Trim trailing dots from the username
+		for len(name) > 0 && name[len(name)-1] == '.' {
+			name = name[:len(name)-1]
+		}
+		if len(name) == 0 {
+			continue
+		}
+
+		// Skip if starts or ends with hyphen
+		if name[0] == '-' || name[len(name)-1] == '-' {
+			continue
+		}
+		// Skip if contains consecutive hyphens
+		if strings.Contains(name, "--") {
+			continue
+		}
+		// Skip if contains consecutive dots
+		if strings.Contains(name, "..") {
+			continue
+		}
+		// Skip if starts with dot
+		if name[0] == '.' {
+			continue
+		}
+
 		if !usernameMap[name] {
 			usernames = append(usernames, name)
 			usernameMap[name] = true
 		}
 	}
-
 	return usernames
 }
 
