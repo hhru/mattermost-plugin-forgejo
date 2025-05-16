@@ -30,6 +30,15 @@ func TestParseGitHubUsernameFromText(t *testing.T) {
 		{Text: "@jwilander2 @jwilander", Expected: []string{"jwilander2", "jwilander"}},
 		{Text: "Hey @jwilander and @jwilander2!", Expected: []string{"jwilander", "jwilander2"}},
 		{Text: "@jwilander @jwilan--der2", Expected: []string{"jwilander"}},
+		{Text: "@my.user", Expected: []string{"my.user"}},
+		{Text: "@my.user.name", Expected: []string{"my.user.name"}},
+		{Text: "@my.user @other.user", Expected: []string{"my.user", "other.user"}},
+		{Text: "Hey @my.user and @other.user!", Expected: []string{"my.user", "other.user"}},
+		{Text: "@my.user-", Expected: []string{}},
+		{Text: "@-my.user", Expected: []string{}},
+		{Text: "@my..user", Expected: []string{}},
+		{Text: "@.my.user", Expected: []string{}},
+		{Text: "@my.user.", Expected: []string{"my.user"}},
 	}
 
 	for _, tc := range tcs {
