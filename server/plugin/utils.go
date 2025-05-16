@@ -99,6 +99,30 @@ func parseOwnerAndRepo(full, baseURL string) (string, string) {
 	return owner, repo
 }
 
+// isValidUsername checks if a username is valid according to the rules:
+// - Must not start or end with hyphen
+// - Must not contain consecutive hyphens
+// - Must not contain consecutive dots
+// - Must not start with dot
+func isValidUsername(name string) bool {
+	if len(name) == 0 {
+		return false
+	}
+	if name[0] == '-' || name[len(name)-1] == '-' {
+		return false
+	}
+	if strings.Contains(name, "--") {
+		return false
+	}
+	if strings.Contains(name, "..") {
+		return false
+	}
+	if name[0] == '.' {
+		return false
+	}
+	return true
+}
+
 func parseForgejoUsernamesFromText(text string) []string {
 	usernameMap := map[string]bool{}
 	usernames := []string{}
@@ -106,45 +130,20 @@ func parseForgejoUsernamesFromText(text string) []string {
 	for _, word := range strings.FieldsFunc(text, func(c rune) bool {
 		return !(c == '-' || c == '@' || c == '.' || unicode.IsLetter(c) || unicode.IsNumber(c))
 	}) {
-		// Trim leading non-@, non-alnum, non-hyphen, non-dot chars
 		for len(word) > 0 && word[0] != '@' {
 			word = word[1:]
 		}
-		// Trim trailing non-alnum, non-hyphen, non-dot chars
-		for len(word) > 0 && !(unicode.IsLetter(rune(word[len(word)-1])) || unicode.IsNumber(rune(word[len(word)-1])) || word[len(word)-1] == '-' || word[len(word)-1] == '.') {
-			word = word[:len(word)-1]
-		}
-
 		if len(word) < 2 || word[0] != '@' {
 			continue
 		}
-
 		name := word[1:]
-		// Trim trailing dots from the username
+		// Always trim trailing dots
 		for len(name) > 0 && name[len(name)-1] == '.' {
 			name = name[:len(name)-1]
 		}
-		if len(name) == 0 {
+		if !isValidUsername(name) {
 			continue
 		}
-
-		// Skip if starts or ends with hyphen
-		if name[0] == '-' || name[len(name)-1] == '-' {
-			continue
-		}
-		// Skip if contains consecutive hyphens
-		if strings.Contains(name, "--") {
-			continue
-		}
-		// Skip if contains consecutive dots
-		if strings.Contains(name, "..") {
-			continue
-		}
-		// Skip if starts with dot
-		if name[0] == '.' {
-			continue
-		}
-
 		if !usernameMap[name] {
 			usernames = append(usernames, name)
 			usernameMap[name] = true
