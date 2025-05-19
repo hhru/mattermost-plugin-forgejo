@@ -104,27 +104,36 @@ func parseForgejoUsernamesFromText(text string) []string {
 	usernames := []string{}
 
 	for _, word := range strings.FieldsFunc(text, func(c rune) bool {
-		return !(c == '-' || c == '@' || unicode.IsLetter(c) || unicode.IsNumber(c))
+		return !(c == '-' || c == '@' || c == '.' || unicode.IsLetter(c) || unicode.IsNumber(c))
 	}) {
+		word = strings.Trim(word, ".")
 		if len(word) < 2 || word[0] != '@' {
 			continue
 		}
 
+		// Skip if starts or ends with hyphen
 		if word[1] == '-' || word[len(word)-1] == '-' {
 			continue
 		}
-
+		// Skip if contains consecutive hyphens
 		if strings.Contains(word, "--") {
 			continue
 		}
-
+		// Skip if contains consecutive dots
+		if strings.Contains(word, "..") {
+			continue
+		}
 		name := word[1:]
+		// Skip if starts with dot
+		if name[0] == '.' {
+			continue
+		}
+
 		if !usernameMap[name] {
 			usernames = append(usernames, name)
 			usernameMap[name] = true
 		}
 	}
-
 	return usernames
 }
 
