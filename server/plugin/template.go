@@ -482,6 +482,10 @@ Assignees: {{range $i, $el := .Assignees -}} {{- if $i}}, {{end}}{{template "FUs
 		"* `/forgejo settings [setting] [value]` - Update your user settings\n" +
 		"  * `setting` can be `notifications` or `reminders`\n" +
 		"  * `value` can be `on` or `off`\n" +
+		"  * `setting` can be `team-review-notifications`\n" +
+		"    * `value` can be `on` or `off`\n" +
+		"    * When `on`, you can use `--exclude` flag to specify repositories to exclude from team notifications\n" +
+		"    * Example: `/forgejo settings team-review-notifications on --exclude repo1,repo2`\n" +
 		"* `/forgejo mute` - Managed muted Forgejo users. You'll not receive notifications for comments in your PRs and issues from those users.\n" +
 		"  * `/forgejo mute list` - list your muted Forgejo users\n" +
 		"  * `/forgejo mute add [username]` - add a Forgejo user to your muted list\n" +

@@ -667,6 +667,38 @@ func (p *Plugin) handleSettings(_ *plugin.Context, _ *model.CommandArgs, paramet
 		default:
 			return "Invalid value. Accepted values are: \"on\" or \"off\" or \"on-change\" ."
 		}
+	case settingTeamNotifications:
+		switch settingValue {
+		case settingOn:
+			userInfo.Settings.DisableTeamNotifications = false
+			if len(parameters) > 2 {
+				flag := parameters[2]
+				if !isFlag(flag) {
+					return "Please use the correct format for flags: --<name> <value>"
+				}
+				parsedFlag := parseFlag(flag)
+				switch parsedFlag {
+				case settingExclude:
+					{
+						if len(parameters) != 4 {
+							return "Must set excluded repos"
+						}
+						repos := strings.Split(parameters[3], ",")
+						for i := range repos {
+							repos[i] = strings.TrimSpace(repos[i])
+						}
+						userInfo.Settings.ExcludeTeamReviewNotifications = repos
+					}
+				default:
+					return "Unknown flag"
+				}
+			} else {
+				userInfo.Settings.ExcludeTeamReviewNotifications = []string{}
+			}
+		case settingOff:
+			userInfo.Settings.ExcludeTeamReviewNotifications = []string{}
+			userInfo.Settings.DisableTeamNotifications = true
+		}
 	default:
 		return "Unknown setting " + setting
 	}
@@ -1006,6 +1038,18 @@ func getAutocompleteData(config *Configuration) *model.AutocompleteData {
 	}}
 	remainderNotifications.AddStaticListArgument("", true, settingValue)
 	settings.AddCommand(remainderNotifications)
+
+	excludeTeamNotifications := model.NewAutocompleteData(settingTeamNotifications, "", "Configure team review notifications")
+	settingValue = []model.AutocompleteListItem{{
+		HelpText: "Enable team review notifications (you will be notified when your team is requested for review)",
+		Item:     "on",
+	}, {
+		HelpText: "Disable team review notifications (you will not be notified when your team is requested for review)",
+		Item:     "off",
+	}}
+	excludeTeamNotifications.AddStaticListArgument("", true, settingValue)
+	excludeTeamNotifications.AddNamedTextArgument(settingExclude, "Exclude specific repositories", "Comma-separated list of repository names to exclude from team notifications (e.g. 'repo1,repo2'). Only works when team-review-notifications is turned on", `/[^,-\s]+(,[^,-\s]+)*/`, false)
+	settings.AddCommand(excludeTeamNotifications)
 
 	forgejo.AddCommand(settings)
 

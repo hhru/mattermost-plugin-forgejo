@@ -220,17 +220,19 @@ func (p *FPullRequestReview) GetContent() string {
 }
 
 type FPullRequest struct {
-	ID        *int      `json:"id,omitempty"`
-	Labels    []*FLabel `json:"labels,omitempty"`
-	User      *FUser    `json:"user,omitempty"`
-	Number    *int      `json:"number,omitempty"`
-	Draft     *bool     `json:"draft,omitempty"`
-	Merged    *bool     `json:"merged,omitempty"`
-	Title     *string   `json:"title,omitempty"`
-	HTMLURL   *string   `json:"html_url,omitempty"`
-	Assignee  *FUser    `json:"assignee,omitempty"`
-	Assignees []*FUser  `json:"assignees,omitempty"`
-	Body      *string   `json:"body,omitempty"`
+	ID                      *int      `json:"id,omitempty"`
+	Labels                  []*FLabel `json:"labels,omitempty"`
+	User                    *FUser    `json:"user,omitempty"`
+	Number                  *int      `json:"number,omitempty"`
+	Draft                   *bool     `json:"draft,omitempty"`
+	Merged                  *bool     `json:"merged,omitempty"`
+	Title                   *string   `json:"title,omitempty"`
+	HTMLURL                 *string   `json:"html_url,omitempty"`
+	Assignee                *FUser    `json:"assignee,omitempty"`
+	Assignees               []*FUser  `json:"assignees,omitempty"`
+	Body                    *string   `json:"body,omitempty"`
+	RequestedReviewers      []*FUser  `json:"requested_reviewers,omitempty"`
+	RequestedReviewersTeams []*FTeam  `json:"requested_reviewers_teams,omitempty"`
 }
 
 func (p *FPullRequestEvent) GetPullRequest() *FPullRequest {
@@ -284,6 +286,11 @@ type FLabel struct {
 }
 
 type FTaskStep = github.TaskStep
+
+type FTeam struct {
+	ID   *int64  `json:"id,omitempty"`
+	Name *string `json:"name,omitempty"`
+}
 
 func (p *Plugin) writeJSON(w http.ResponseWriter, v interface{}) {
 	b, err := json.Marshal(v)
