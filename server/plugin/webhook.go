@@ -1228,7 +1228,7 @@ func (p *Plugin) handlePullRequestNotification(event *FPullRequestEvent) {
 			return
 		}
 		requestedUserID = p.getForgejoToUserIDMapping(requestedReviewer)
-		if isPrivate && !p.permissionToRepo(requestedUserID, repoName) {
+		if p.ignoreRequestedReview(event, requestedUserID) || isPrivate && !p.permissionToRepo(requestedUserID, repoName) {
 			requestedUserID = ""
 		}
 	case actionClosed:
@@ -1273,6 +1273,40 @@ func (p *Plugin) handlePullRequestNotification(event *FPullRequestEvent) {
 	}
 
 	p.postIssueNotification(message, authorUserID, assigneeUserID)
+}
+
+func (p *Plugin) ignoreRequestedReview(event *FPullRequestEvent, requestedUserID string) bool {
+	if requestedUserID == "" || len(event.PullRequest.RequestedReviewersTeams) == 0 {
+		return false
+	}
+	reviewers := event.PullRequest.RequestedReviewers
+	if event.RequestedReviewer != nil && len(reviewers) > 0 {
+		requestedReviewer := *event.RequestedReviewer.Login
+		for _, prReviewer := range reviewers {
+			if *prReviewer.Login == requestedReviewer {
+				return false
+			}
+		}
+	}
+	userInfo, response := p.getGitHubUserInfo(requestedUserID)
+	if response != nil {
+		p.client.Log.Warn("Failed to get stored userInfo", "error", response.Error())
+		return false
+	}
+	if userInfo.Settings.DisableTeamNotifications {
+		return true
+	}
+	excludedRepos := userInfo.Settings.ExcludeTeamReviewNotifications
+	if len(excludedRepos) == 0 {
+		return false
+	}
+	currentRepo := *event.Repo.FullName
+	for _, excludedRepo := range excludedRepos {
+		if excludedRepo == currentRepo {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *Plugin) handleIssueNotification(event *github.IssuesEvent) {

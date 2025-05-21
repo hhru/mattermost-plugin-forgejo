@@ -37,12 +37,14 @@ const (
 	wsEventRefresh      = "refresh"
 	wsEventCreateIssue  = "createIssue"
 
-	settingButtonsTeam   = "team"
-	settingNotifications = "notifications"
-	settingReminders     = "reminders"
-	settingOn            = "on"
-	settingOff           = "off"
-	settingOnChange      = "on-change"
+	settingButtonsTeam       = "team"
+	settingNotifications     = "notifications"
+	settingTeamNotifications = "team-review-notifications"
+	settingReminders         = "reminders"
+	settingOn                = "on"
+	settingOff               = "off"
+	settingOnChange          = "on-change"
+	settingExclude           = "exclude"
 
 	dailySummary = "_dailySummary"
 )
@@ -548,10 +550,12 @@ type ForgejoUserInfo struct {
 }
 
 type UserSettings struct {
-	SidebarButtons        string `json:"sidebar_buttons"`
-	DailyReminder         bool   `json:"daily_reminder"`
-	DailyReminderOnChange bool   `json:"daily_reminder_on_change"`
-	Notifications         bool   `json:"notifications"`
+	SidebarButtons                 string   `json:"sidebar_buttons"`
+	DailyReminder                  bool     `json:"daily_reminder"`
+	DailyReminderOnChange          bool     `json:"daily_reminder_on_change"`
+	Notifications                  bool     `json:"notifications"`
+	DisableTeamNotifications       bool     `json:"disable_team_review_notifications"`
+	ExcludeTeamReviewNotifications []string `json:"exclude_team_review_notifications"`
 }
 
 func (p *Plugin) storeGitHubUserInfo(info *ForgejoUserInfo) error {
