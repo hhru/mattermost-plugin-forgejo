@@ -680,8 +680,11 @@ func (p *Plugin) handleSettings(_ *plugin.Context, _ *model.CommandArgs, paramet
 				switch parsedFlag {
 				case settingExclude:
 					{
-						if len(parameters) != 4 {
+						if len(parameters) < 4 {
 							return "Must set excluded repos"
+						}
+						if len(parameters) > 4 {
+							return "Invalid format. Repository names must be comma-separated in a single argument"
 						}
 						repos := strings.Split(parameters[3], ",")
 						for i := range repos {
@@ -698,6 +701,8 @@ func (p *Plugin) handleSettings(_ *plugin.Context, _ *model.CommandArgs, paramet
 		case settingOff:
 			userInfo.Settings.ExcludeTeamReviewNotifications = []string{}
 			userInfo.Settings.DisableTeamNotifications = true
+		default:
+			return "Invalid setting. Use `on` or `off`."
 		}
 	default:
 		return "Unknown setting " + setting

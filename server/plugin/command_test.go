@@ -17,6 +17,10 @@ import (
 	"github.com/mattermost/mattermost-plugin-github/server/mocks"
 )
 
+const (
+	testToken = "ycbODW-BWbNBGfF7ac4T5RL5ruNm5BChCXgbkY1bWHqMt80JTkLsicQwo8de3tqfqlfMaglpgjqGOmSHeGp0dA=="
+)
+
 // Function to get the plugin object for test cases.
 func getPluginTest(api *plugintest.API, mockKvStore *mocks.MockKvStore) *Plugin {
 	p := NewPlugin()
@@ -325,12 +329,149 @@ func TestExecuteCommand(t *testing.T) {
 				assert.Contains(t, post.Message, tt.expectedMsg)
 			}).Once().Return(&model.Post{})
 
+			// Allow LogWarn calls for decryption errors
+			currentTestAPI.On("LogWarn", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+
 			p := getPluginTest(currentTestAPI, mockKvStore)
 
 			_, err := p.ExecuteCommand(&plugin.Context{}, tt.commandArgs)
 			require.Nil(t, err)
 
 			assert.Equal(t, true, isSendEphemeralPostCalled)
+		})
+	}
+}
+
+func TestHandleTeamReviewNotifications(t *testing.T) {
+	tests := map[string]struct {
+		expectedMsg    string
+		userInfo       *ForgejoUserInfo
+		parameters     []string
+		SetupMockStore func(*mocks.MockKvStore)
+	}{
+		"team review notifications off": {
+			expectedMsg: "Settings updated.",
+			parameters:  []string{"team-review-notifications", "off"},
+			userInfo: &ForgejoUserInfo{
+				UserID: "test-userID",
+				Token: &oauth2.Token{
+					AccessToken:  testToken,
+					RefreshToken: testToken,
+				},
+				Settings: &UserSettings{
+					DisableTeamNotifications:       false,
+					ExcludeTeamReviewNotifications: []string{"repo1", "repo2"},
+				},
+			},
+			SetupMockStore: func(mks *mocks.MockKvStore) {
+				mks.EXPECT().Set("test-userID"+forgejoTokenKey, gomock.Any(), gomock.Any()).DoAndReturn(func(key string, value interface{}, options ...pluginapi.KVSetOption) (bool, error) {
+					userInfo, ok := value.(*ForgejoUserInfo)
+					require.True(t, ok, "value should be *ForgejoUserInfo")
+					assert.Equal(t, "test-userID", userInfo.UserID)
+					assert.True(t, userInfo.Settings.DisableTeamNotifications)
+					assert.Empty(t, userInfo.Settings.ExcludeTeamReviewNotifications)
+					return true, nil
+				})
+			},
+		},
+		"team review notifications on": {
+			expectedMsg: "Settings updated.",
+			parameters:  []string{"team-review-notifications", "on"},
+			userInfo: &ForgejoUserInfo{
+				UserID: "test-userID",
+				Token: &oauth2.Token{
+					AccessToken:  testToken,
+					RefreshToken: testToken,
+				},
+				Settings: &UserSettings{
+					DisableTeamNotifications:       true,
+					ExcludeTeamReviewNotifications: []string{"repo1", "repo2"},
+				},
+			},
+			SetupMockStore: func(mks *mocks.MockKvStore) {
+				mks.EXPECT().Set("test-userID"+forgejoTokenKey, gomock.Any(), gomock.Any()).DoAndReturn(func(key string, value interface{}, options ...pluginapi.KVSetOption) (bool, error) {
+					userInfo, ok := value.(*ForgejoUserInfo)
+					require.True(t, ok, "value should be *ForgejoUserInfo")
+					assert.Equal(t, "test-userID", userInfo.UserID)
+					assert.False(t, userInfo.Settings.DisableTeamNotifications)
+					assert.Empty(t, userInfo.Settings.ExcludeTeamReviewNotifications)
+					return true, nil
+				})
+			},
+		},
+		"team review notifications exclude with incorrect values": {
+			expectedMsg: "Invalid format. Repository names must be comma-separated in a single argument",
+			parameters:  []string{"team-review-notifications", "on", "--exclude", "repo1", "repo2"},
+			userInfo: &ForgejoUserInfo{
+				UserID: "test-userID",
+				Token: &oauth2.Token{
+					AccessToken:  testToken,
+					RefreshToken: testToken,
+				},
+				Settings: &UserSettings{
+					DisableTeamNotifications:       true,
+					ExcludeTeamReviewNotifications: []string{},
+				},
+			},
+			SetupMockStore: func(mks *mocks.MockKvStore) {},
+		},
+		"team review notifications with incorrect setting": {
+			expectedMsg: "Invalid setting. Use `on` or `off`.",
+			parameters:  []string{"team-review-notifications", "invalid"},
+			userInfo: &ForgejoUserInfo{
+				UserID: "test-userID",
+				Token: &oauth2.Token{
+					AccessToken:  testToken,
+					RefreshToken: testToken,
+				},
+				Settings: &UserSettings{
+					DisableTeamNotifications:       false,
+					ExcludeTeamReviewNotifications: []string{},
+				},
+			},
+			SetupMockStore: func(mks *mocks.MockKvStore) {},
+		},
+		"team review notifications with correct exclude flag": {
+			expectedMsg: "Settings updated.",
+			parameters:  []string{"team-review-notifications", "on", "--exclude", "repo1,repo2,repo3"},
+			userInfo: &ForgejoUserInfo{
+				UserID: "test-userID",
+				Token: &oauth2.Token{
+					AccessToken:  testToken,
+					RefreshToken: testToken,
+				},
+				Settings: &UserSettings{
+					DisableTeamNotifications:       true,
+					ExcludeTeamReviewNotifications: []string{},
+				},
+			},
+			SetupMockStore: func(mks *mocks.MockKvStore) {
+				mks.EXPECT().Set("test-userID"+forgejoTokenKey, gomock.Any(), gomock.Any()).DoAndReturn(func(key string, value interface{}, options ...pluginapi.KVSetOption) (bool, error) {
+					userInfo, ok := value.(*ForgejoUserInfo)
+					require.True(t, ok, "value should be *ForgejoUserInfo")
+					assert.Equal(t, "test-userID", userInfo.UserID)
+					assert.False(t, userInfo.Settings.DisableTeamNotifications)
+					assert.Equal(t, []string{"repo1", "repo2", "repo3"}, userInfo.Settings.ExcludeTeamReviewNotifications)
+					return true, nil
+				})
+			},
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			mockCtrl := gomock.NewController(t)
+			defer mockCtrl.Finish()
+
+			mockKvStore := mocks.NewMockKvStore(mockCtrl)
+
+			tt.SetupMockStore(mockKvStore)
+
+			currentTestAPI := &plugintest.API{}
+			p := getPluginTest(currentTestAPI, mockKvStore)
+
+			msg := p.handleSettings(&plugin.Context{}, &model.CommandArgs{}, tt.parameters, tt.userInfo)
+			assert.Equal(t, tt.expectedMsg, msg)
 		})
 	}
 }
