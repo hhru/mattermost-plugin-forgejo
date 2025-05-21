@@ -1280,29 +1280,29 @@ func (p *Plugin) ignoreRequestedReview(event *FPullRequestEvent, requestedUserID
 		return false
 	}
 	reviewers := event.PullRequest.RequestedReviewers
-	if len(reviewers) > 0 {
+	if event.RequestedReviewer != nil && len(reviewers) > 0 {
 		requestedReviewer := *event.RequestedReviewer.Login
-		for _, reviewer := range reviewers {
-			if *reviewer.Login == requestedReviewer {
+		for _, prReviewer := range reviewers {
+			if *prReviewer.Login == requestedReviewer {
 				return false
 			}
 		}
 	}
-	info, response := p.getGitHubUserInfo(requestedUserID)
+	userInfo, response := p.getGitHubUserInfo(requestedUserID)
 	if response != nil {
 		p.client.Log.Warn("Failed to get stored userInfo", "error", response.Error())
 		return false
 	}
-	if info.Settings.DisableTeamNotifications {
+	if userInfo.Settings.DisableTeamNotifications {
 		return true
 	}
-	excluded := info.Settings.ExcludeTeamReviewNotifications
-	if len(excluded) == 0 {
+	excludedRepos := userInfo.Settings.ExcludeTeamReviewNotifications
+	if len(excludedRepos) == 0 {
 		return false
 	}
-	repoName := *event.Repo.FullName
-	for _, ex := range excluded {
-		if ex == repoName {
+	currentRepo := *event.Repo.FullName
+	for _, excludedRepo := range excludedRepos {
+		if excludedRepo == currentRepo {
 			return true
 		}
 	}

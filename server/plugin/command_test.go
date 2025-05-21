@@ -329,9 +329,6 @@ func TestExecuteCommand(t *testing.T) {
 				assert.Contains(t, post.Message, tt.expectedMsg)
 			}).Once().Return(&model.Post{})
 
-			// Allow LogWarn calls for decryption errors
-			currentTestAPI.On("LogWarn", mock.Anything, mock.Anything, mock.Anything).Return(nil)
-
 			p := getPluginTest(currentTestAPI, mockKvStore)
 
 			_, err := p.ExecuteCommand(&plugin.Context{}, tt.commandArgs)

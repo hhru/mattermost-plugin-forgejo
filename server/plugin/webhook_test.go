@@ -47,7 +47,16 @@ func TestIgnoreRequestedReview(t *testing.T) {
 				RequestedReviewer: &FUser{Login: stringPtr("test-user")},
 			},
 			requestedUserID: "test-userID",
-			expected:        false,
+			userInfo: &ForgejoUserInfo{
+				Token: &oauth2.Token{
+					AccessToken:  testToken,
+					RefreshToken: testToken,
+				},
+				Settings: &UserSettings{
+					DisableTeamNotifications: true,
+				},
+			},
+			expected: false,
 		},
 		"team notifications disabled": {
 			event: &FPullRequestEvent{
@@ -129,7 +138,8 @@ func TestIgnoreRequestedReview(t *testing.T) {
 					DoAndReturn(func(key string, value interface{}) error {
 						*(value.(**ForgejoUserInfo)) = tt.userInfo
 						return nil
-					})
+					}).
+					AnyTimes()
 			}
 
 			result := p.ignoreRequestedReview(tt.event, tt.requestedUserID)

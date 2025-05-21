@@ -672,29 +672,11 @@ func (p *Plugin) handleSettings(_ *plugin.Context, _ *model.CommandArgs, paramet
 		case settingOn:
 			userInfo.Settings.DisableTeamNotifications = false
 			if len(parameters) > 2 {
-				flag := parameters[2]
-				if !isFlag(flag) {
-					return "Please use the correct format for flags: --<name> <value>"
+				repos, errMsg := processTeamNotificationsExcludeFlag(parameters[2:])
+				if errMsg != "" {
+					return errMsg
 				}
-				parsedFlag := parseFlag(flag)
-				switch parsedFlag {
-				case settingExclude:
-					{
-						if len(parameters) < 4 {
-							return "Must set excluded repos"
-						}
-						if len(parameters) > 4 {
-							return "Invalid format. Repository names must be comma-separated in a single argument"
-						}
-						repos := strings.Split(parameters[3], ",")
-						for i := range repos {
-							repos[i] = strings.TrimSpace(repos[i])
-						}
-						userInfo.Settings.ExcludeTeamReviewNotifications = repos
-					}
-				default:
-					return "Unknown flag"
-				}
+				userInfo.Settings.ExcludeTeamReviewNotifications = repos
 			} else {
 				userInfo.Settings.ExcludeTeamReviewNotifications = []string{}
 			}
@@ -1132,4 +1114,36 @@ func SliceContainsString(a []string, x string) bool {
 		}
 	}
 	return false
+}
+
+// processTeamNotificationsExcludeFlag processes the exclude flag for team notifications
+// Returns the list of repositories and an error message if any
+func processTeamNotificationsExcludeFlag(parameters []string) ([]string, string) {
+	if len(parameters) < 2 {
+		return nil, "Must set excluded repos"
+	}
+
+	flag := parameters[0]
+	if !isFlag(flag) {
+		return nil, "Please use the correct format for flags: --<name> <value>"
+	}
+
+	parsedFlag := parseFlag(flag)
+	if parsedFlag != settingExclude {
+		return nil, "Unknown flag"
+	}
+
+	if len(parameters) > 2 {
+		return nil, "Invalid format. Repository names must be comma-separated in a single argument"
+	}
+
+	repos := strings.Split(parameters[1], ",")
+	for i := range repos {
+		repos[i] = strings.TrimSpace(repos[i])
+		if repos[i] == "" {
+			return nil, "Repository names cannot be empty"
+		}
+	}
+
+	return repos, ""
 }
