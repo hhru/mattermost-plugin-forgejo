@@ -362,6 +362,12 @@ Assignees: {{range $i, $el := .Assignees -}} {{- if $i}}, {{end}}{{template "FUs
 {{.Comment.Body | trimBody | replaceAllForgejoUsernames}}
 `))
 
+	template.Must(masterTemplate.New("commentReply").Funcs(funcMap).Parse(`
+{{template "FRepo" .Repo}} {{template "FUser" .Sender}} [replied]({{.Comment.HTMLURL}}) you on {{template "FIssue" .Issue}}:
+
+{{.Comment.Body | trimBody | replaceAllForgejoUsernames}}
+`))
+
 	template.Must(masterTemplate.New("pullRequestReviewEvent").Funcs(funcMap).Parse(`
 {{template "FRepo" .Repo}} {{template "FUser" .Sender}}
 {{- if eq .GetReview.GetType "pull_request_review_approved"}} approved

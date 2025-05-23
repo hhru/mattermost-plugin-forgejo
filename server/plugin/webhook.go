@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"html"
 	"io"
+	"log"
 	"net/http"
 	"reflect"
 	"strings"
@@ -278,6 +279,7 @@ func (p *Plugin) handleWebhook(w http.ResponseWriter, r *http.Request) {
 			p.handleCommentMentionNotification(event)
 			p.handleCommentAuthorNotification(event)
 			p.handleCommentAssigneeNotification(event)
+			p.handleCommentReplyNotification(event)
 		}
 	case *FPullRequestReviewEvent:
 		repo = &github.Repository{
@@ -1208,6 +1210,166 @@ func (p *Plugin) handleCommentAssigneeNotification(event *FIssueCommentEvent) {
 		p.CreateBotDMPost(assigneeID, message, "custom_git_assignee")
 		p.sendRefreshEvent(assigneeID)
 	}
+}
+
+func (p *Plugin) handleCommentReplyNotification(event *FIssueCommentEvent) {
+	prID := *event.Issue.Number
+	targetCommentID := *event.Comment.ID
+	excludeAuthor := *event.Sender.Login
+	issueAuthor := *event.Issue.User.Login
+	owner := *event.Repo.Owner.Login
+	repo := *event.Repo.Name
+
+	participants, _ := p.findThreadParticipants(excludeAuthor, issueAuthor, owner, repo, prID, targetCommentID)
+	if participants == nil {
+		return
+	}
+
+	excludedUsers := make(map[string]struct{})
+	excludedUsers[excludeAuthor] = struct{}{}
+
+	if event.Comment.Body != nil && *event.Comment.Body != "" {
+		mentionedInTarget := parseForgejoUsernamesFromText(*event.Comment.Body)
+		for _, user := range mentionedInTarget {
+			excludedUsers[user] = struct{}{}
+		}
+	}
+
+	message, err := renderTemplate("commentReply", event)
+	if err != nil {
+		p.client.Log.Warn("Failed to render template", "error", err.Error())
+		return
+	}
+	assignees := event.Issue.Assignees
+	for username := range participants {
+		assigneeMentioned := false
+		for _, assignee := range assignees {
+			if username == *assignee.Login {
+				assigneeMentioned = true
+				break
+			}
+		}
+
+		// This has been handled in "handleCommentAssigneeNotification" function
+		if assigneeMentioned {
+			continue
+		}
+
+		// Don't notify user of their own comment
+		if username == *event.Sender.Login {
+			continue
+		}
+
+		// Notifications for issue authors are handled separately
+		if username == *event.Issue.User.Login {
+			continue
+		}
+
+		userID := p.getForgejoToUserIDMapping(username)
+		if userID == "" {
+			continue
+		}
+
+		if *event.Repo.Private && !p.permissionToRepo(userID, *event.Repo.FullName) {
+			continue
+		}
+
+		channel, err := p.client.Channel.GetDirect(userID, p.BotUserID)
+		if err != nil {
+			continue
+		}
+
+		post := p.makeBotPost(message, "custom_git_mention")
+
+		post.ChannelId = channel.Id
+		if err = p.client.Post.CreatePost(post); err != nil {
+			p.client.Log.Warn("Error creating mention post", "error", err.Error())
+		}
+
+		p.sendRefreshEvent(userID)
+	}
+}
+
+func (p *Plugin) findThreadParticipants(excludeAuthor string, issueAuthor string, owner string, repo string, prID int, targetCommentID int) (map[string]struct{}, bool) {
+	authorId := p.getForgejoToUserIDMapping(excludeAuthor)
+	ghClient, apiErr := p.GetGitHubClient(context.Background(), authorId)
+	if apiErr != nil {
+		issueAuthorId := p.getForgejoToUserIDMapping(issueAuthor)
+		ghClient, apiErr = p.GetGitHubClient(context.Background(), issueAuthorId)
+		if apiErr != nil {
+			return nil, true
+		}
+	}
+
+	// GetReviews fetches all reviews for a pull request
+	var allReviews []*github.PullRequestReview
+	listReviewsOpts := &github.ListOptions{PerPage: 100}
+	for {
+		reviews, resp, err := ghClient.PullRequests.ListReviews(context.Background(), owner, repo, prID, listReviewsOpts)
+		if err != nil {
+			//return nil, fmt.Errorf("failed to list reviews for PR %d: %w", prID, err)
+		}
+		allReviews = append(allReviews, reviews...)
+		if resp.NextPage == 0 {
+			break
+		}
+		listReviewsOpts.Page = resp.NextPage
+	}
+
+	var allCommentsInThread []*github.PullRequestComment
+	var targetComment *github.PullRequestComment
+
+	found := false
+	for _, review := range allReviews {
+		if review.ID == nil {
+			log.Printf("Warning: skipping review with nil ID in PR %d", prID)
+			continue
+		}
+
+		// GetReviewComments fetches all comments for a specific review
+		var reviewComments []*github.PullRequestComment
+		listReviewCommentsOpts := &github.ListOptions{PerPage: 100}
+		for {
+			comments, resp, err := ghClient.PullRequests.ListReviewComments(context.Background(), owner, repo, prID, *review.ID, listReviewCommentsOpts)
+			if err != nil {
+				log.Printf("Warning: failed to get comments for review %d in PR %d: %v", *review.ID, prID, err)
+				// Decide if this is a fatal error or if we can continue to other reviews
+				break // Breaking here for this review, will try next review
+			}
+			reviewComments = append(reviewComments, comments...)
+			if resp.NextPage == 0 {
+				break
+			}
+			listReviewCommentsOpts.Page = resp.NextPage
+		}
+
+		// If an error occurred fetching comments for this specific review, we might have partial data or none.
+		// The current logic will just move to the next review if the inner loop was broken by an error.
+		for _, comment := range reviewComments {
+			if comment.ID != nil && *comment.ID == int64(targetCommentID) {
+				targetComment = comment
+				allCommentsInThread = reviewComments
+				found = true
+				break
+			}
+		}
+		if found {
+			break
+		}
+	}
+
+	if !found || targetComment == nil {
+		return nil, true
+		//return nil, fmt.Errorf("comment with ID %d not found in PR %d", targetCommentID, prID)
+	}
+
+	participants := make(map[string]struct{})
+	for _, comment := range allCommentsInThread {
+		if comment.User != nil && comment.User.Login != nil && *comment.User.Login != "" {
+			participants[*comment.User.Login] = struct{}{}
+		}
+	}
+	return participants, false
 }
 
 func (p *Plugin) handlePullRequestNotification(event *FPullRequestEvent) {
