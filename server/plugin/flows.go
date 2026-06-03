@@ -1,8 +1,11 @@
 package plugin
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -681,23 +684,32 @@ func (fm *FlowManager) submitWebhook(f *flow.Flow, submitted map[string]interfac
 		return "", nil, nil, errors.New("invalid format")
 	}
 
-	webhookEvents := []string{"create", "delete", "issue_comment", "issues", "pull_request", "pull_request_review", "pull_request_review_comment", "push", "star"}
+	webhookEvents := []string{"create", "delete", "push", "issues", "issue_comment", "pull_request", "pull_request_comment", "pull_request_review", "release"}
 
 	webHookURL, err := buildPluginURL(fm.client, "webhook")
 	if err != nil {
 		fm.client.Log.Warn("Failed to build webHookURL", "err", err)
 	}
 
-	webhookConfig := map[string]interface{}{
-		"content_type": "json",
-		"insecure_ssl": "0",
-		"secret":       config.WebhookSecret,
-		"url":          webHookURL,
+	// Forgejo's create-hook API requires a "type" field and uses its own
+	// CreateHookOption shape; the go-github Hook{} omits "type", so Forgejo
+	// rejects the request with "[Type]: Required". Build the native payload
+	// instead and POST it with the user's already-authenticated client. The
+	// hook is created with the plugin's own WebhookSecret, so incoming
+	// deliveries verify against the same secret (X-Hub-Signature).
+	createHook := map[string]interface{}{
+		"type":   "forgejo",
+		"active": true,
+		"events": webhookEvents,
+		"config": map[string]string{
+			"url":          webHookURL,
+			"content_type": "json",
+			"secret":       config.WebhookSecret,
+		},
 	}
-
-	hook := &github.Hook{
-		Events: webhookEvents,
-		Config: webhookConfig,
+	body, err := json.Marshal(createHook)
+	if err != nil {
+		return "", nil, nil, errors.Wrap(err, "failed to marshal webhook payload")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 28*time.Second) // HTTP request times out after 30 seconds
@@ -708,49 +720,41 @@ func (fm *FlowManager) submitWebhook(f *flow.Flow, submitted map[string]interfac
 		return "", nil, nil, err
 	}
 
-	ch := fm.pingBroker.SubscribePings()
-
-	var resp *github.Response
-	var fullName string
-	var repoOrOrg string
+	baseURL := config.getBaseURL()
+	var fullName, repoOrOrg, hooksURL string
 	if repo == "" {
 		fullName = org
 		repoOrOrg = "organization"
-		hook, resp, err = client.Organizations.CreateHook(ctx, org, hook)
+		hooksURL = fmt.Sprintf("%sapi/v1/orgs/%s/hooks", baseURL, org)
 	} else {
 		fullName = org + "/" + repo
 		repoOrOrg = "repository"
-		hook, resp, err = client.Repositories.CreateHook(ctx, org, repo, hook)
+		hooksURL = fmt.Sprintf("%sapi/v1/repos/%s/%s/hooks", baseURL, org, repo)
 	}
 
-	if resp.StatusCode == http.StatusNotFound {
-		err = errors.Errorf("It seems like you don't have privileges to create webhooks in %s. Ask an admin of that %s to run /forgejo setup webhook for you.", fullName, repoOrOrg)
-		return "", nil, nil, err
-	}
-
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, hooksURL, bytes.NewReader(body))
 	if err != nil {
-		var errResp *github.ErrorResponse
-		if errors.As(err, &errResp) {
-			return "", nil, nil, printGithubErrorResponse(errResp)
-		}
+		return "", nil, nil, errors.Wrap(err, "failed to build create-hook request")
+	}
+	req.Header.Set("Content-Type", "application/json")
 
+	resp, err := client.Client().Do(req)
+	if err != nil {
 		return "", nil, nil, errors.Wrap(err, "failed to create hook")
 	}
+	defer resp.Body.Close()
 
-	var found bool
-	for !found {
-		select {
-		case event, ok := <-ch:
-			if ok && event != nil && *event.HookID == *hook.ID {
-				found = true
-			}
-		case <-ctx.Done():
-			return "", nil, nil, errors.New("timed out waiting for webhook event. Please check if the webhook was correctly created")
-		}
+	respBody, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode == http.StatusNotFound {
+		return "", nil, nil, errors.Errorf("It seems like you don't have privileges to create webhooks in %s. Ask an admin of that %s to run /forgejo setup webhook for you.", fullName, repoOrOrg)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", nil, nil, errors.Errorf("failed to create hook (%d): %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
 	}
 
-	fm.pingBroker.UnsubscribePings(ch)
-
+	// Forgejo does not emit a ping event on hook creation (unlike GitHub), so
+	// there is nothing to wait for here — a successful create is confirmation.
 	return stepWebhookConfirmation, nil, nil, nil
 }
 
