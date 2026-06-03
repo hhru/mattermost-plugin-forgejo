@@ -23,7 +23,7 @@
     "@babel/preset-env": "7.11.5",
     "@babel/preset-react": "7.10.4",
     "@babel/preset-typescript": "7.10.4",
-    "@babel/runtime": "7.11.2",
+    "@babel/runtime": "^7.29.7",
     "@emotion/babel-preset-css-prop": "10.0.27",
     "@emotion/core": "10.0.35",
     "@types/enzyme": "3.10.6",
@@ -70,13 +70,17 @@
     "mattermost-redux": "5.33.1",
     "node-fetch": "2.6.7",
     "prop-types": "15.7.2",
-    "react": "16.13.1",
+    "react": "16.14.0",
     "react-bootstrap": "1.3.0",
     "react-custom-scrollbars": "4.2.1",
     "react-markdown": "^8.0.5",
     "react-redux": "7.2.1",
     "react-select": "3.1.0",
     "redux": "4.0.5"
+  },
+  "overrides": {
+    "form-data": "^3.0.4",
+    "moment-timezone": "^0.5.35"
   },
   "jest": {
     "snapshotSerializers": [
