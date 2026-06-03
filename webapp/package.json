@@ -1,10 +1,10 @@
 {
   "private": true,
   "scripts": {
-    "build": "webpack --mode=production",
-    "build:watch": "webpack --mode=production --watch",
-    "debug": "webpack --mode=none",
-    "debug:watch": "webpack --mode=development --watch",
+    "build": "cross-env NODE_OPTIONS=--openssl-legacy-provider webpack --mode=production",
+    "build:watch": "cross-env NODE_OPTIONS=--openssl-legacy-provider webpack --mode=production --watch",
+    "debug": "cross-env NODE_OPTIONS=--openssl-legacy-provider webpack --mode=none",
+    "debug:watch": "cross-env NODE_OPTIONS=--openssl-legacy-provider webpack --mode=development --watch",
     "lint": "eslint --ignore-pattern node_modules --ignore-pattern dist --ext .js --ext .jsx --ext tsx --ext ts . --quiet --cache",
     "fix": "eslint --ignore-pattern node_modules --ignore-pattern dist --ext .js --ext .jsx --ext tsx --ext ts . --quiet --fix --cache",
     "test": "jest --forceExit --detectOpenHandles --verbose",
@@ -41,6 +41,7 @@
     "babel-jest": "26.3.0",
     "babel-loader": "8.1.0",
     "babel-plugin-typescript-to-proptypes": "1.4.1",
+    "cross-env": "7.0.3",
     "css-loader": "4.3.0",
     "enzyme": "3.11.0",
     "enzyme-adapter-react-16": "1.15.4",
