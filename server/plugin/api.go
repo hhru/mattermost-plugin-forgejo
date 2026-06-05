@@ -31,6 +31,9 @@ const (
 
 	requestTimeout       = 30 * time.Second
 	oauthCompleteTimeout = 2 * time.Minute
+
+	channelIDParam    = "channelId"
+	organisationParam = "organization"
 )
 
 type OAuthState struct {
@@ -295,13 +298,13 @@ type FTeam struct {
 func (p *Plugin) writeJSON(w http.ResponseWriter, v interface{}) {
 	b, err := json.Marshal(v)
 	if err != nil {
-		p.client.Log.Warn("Failed to marshal JSON response", "error", err.Error())
+		p.client.Log.Error("Failed to marshal JSON response", "error", err.Error())
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 	_, err = w.Write(b)
 	if err != nil {
-		p.client.Log.Warn("Failed to write JSON response", "error", err.Error())
+		p.client.Log.Error("Failed to write JSON response", "error", err.Error())
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
@@ -310,7 +313,7 @@ func (p *Plugin) writeJSON(w http.ResponseWriter, v interface{}) {
 func (p *Plugin) writeAPIError(w http.ResponseWriter, apiErr *APIErrorResponse) {
 	b, err := json.Marshal(apiErr)
 	if err != nil {
-		p.client.Log.Warn("Failed to marshal API error", "error", err.Error())
+		p.client.Log.Error("Failed to marshal API error", "error", err.Error())
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
@@ -319,7 +322,7 @@ func (p *Plugin) writeAPIError(w http.ResponseWriter, apiErr *APIErrorResponse) 
 
 	_, err = w.Write(b)
 	if err != nil {
-		p.client.Log.Warn("Failed to write JSON response", "error", err.Error())
+		p.client.Log.Error("Failed to write JSON response", "error", err.Error())
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
@@ -350,6 +353,8 @@ func (p *Plugin) initializeAPI() {
 	apiRouter.HandleFunc("/labels", p.checkAuth(p.attachUserContext(p.getLabels), ResponseTypePlain)).Methods(http.MethodGet)
 	apiRouter.HandleFunc("/milestones", p.checkAuth(p.attachUserContext(p.getMilestones), ResponseTypePlain)).Methods(http.MethodGet)
 	apiRouter.HandleFunc("/assignees", p.checkAuth(p.attachUserContext(p.getAssignees), ResponseTypePlain)).Methods(http.MethodGet)
+	apiRouter.HandleFunc("/organizations", p.checkAuth(p.attachUserContext(p.getOrganizations), ResponseTypePlain)).Methods(http.MethodGet)
+	apiRouter.HandleFunc("/repos_by_org", p.checkAuth(p.attachUserContext(p.getReposByOrg), ResponseTypePlain)).Methods(http.MethodGet)
 	apiRouter.HandleFunc("/repositories", p.checkAuth(p.attachUserContext(p.getRepositories), ResponseTypePlain)).Methods(http.MethodGet)
 	apiRouter.HandleFunc("/settings", p.checkAuth(p.attachUserContext(p.updateSettings), ResponseTypePlain)).Methods(http.MethodPost)
 	apiRouter.HandleFunc("/issue", p.checkAuth(p.attachUserContext(p.getIssueByNumber), ResponseTypePlain)).Methods(http.MethodGet)
@@ -500,7 +505,7 @@ func (p *Plugin) connectUserToForgejo(c *Context, w http.ResponseWriter, r *http
 
 	_, err = p.store.Set(forgejoOauthKey+state.Token, state, pluginapi.SetExpiry(TokenTTL))
 	if err != nil {
-		c.Log.WithError(err).Warnf("error occurred while trying to store oauth state into KV store")
+		c.Log.WithError(err).Errorf("error occurred while trying to store oauth state into KV store")
 		p.writeAPIError(w, &APIErrorResponse{Message: "error saving the oauth state", StatusCode: http.StatusInternalServerError})
 		return
 	}
@@ -564,7 +569,7 @@ func (p *Plugin) completeConnectUserToForgejo(c *Context, w http.ResponseWriter,
 
 	err = p.store.Delete(forgejoOauthKey + stateToken)
 	if err != nil {
-		c.Log.WithError(err).Warnf("error occurred while trying to delete oauth state from KV store")
+		c.Log.WithError(err).Errorf("error occurred while trying to delete oauth state from KV store")
 		p.writeAPIError(w, &APIErrorResponse{Message: "error deleting stored state", StatusCode: http.StatusInternalServerError})
 		return
 	}
@@ -592,7 +597,7 @@ func (p *Plugin) completeConnectUserToForgejo(c *Context, w http.ResponseWriter,
 
 	tok, err := conf.Exchange(ctx, code)
 	if err != nil {
-		c.Log.WithError(err).Warnf("Failed to exchange oauth code into token")
+		c.Log.WithError(err).Errorf("Failed to exchange oauth code into token")
 		p.writeAPIError(w, &APIErrorResponse{Message: "failed to exchange oauth code into token", StatusCode: http.StatusInternalServerError})
 		return
 	}
@@ -604,9 +609,6 @@ func (p *Plugin) completeConnectUserToForgejo(c *Context, w http.ResponseWriter,
 		p.writeAPIError(w, &APIErrorResponse{Message: "failed to get authenticated Forgejo user", StatusCode: http.StatusInternalServerError})
 		return
 	}
-
-	// track the successful connection
-	p.TrackUserEvent("account_connected", c.UserID, nil)
 
 	userInfo := &ForgejoUserInfo{
 		UserID:          state.UserID,
@@ -707,7 +709,7 @@ func (p *Plugin) completeConnectUserToForgejo(c *Context, w http.ResponseWriter,
 	w.Header().Set("Content-Type", "text/html")
 	_, err = w.Write([]byte(html))
 	if err != nil {
-		c.Log.WithError(err).Warnf("Failed to write HTML response")
+		c.Log.WithError(err).Errorf("Failed to write HTML response")
 		p.writeAPIError(w, &APIErrorResponse{Message: "failed to write HTML response", StatusCode: http.StatusInternalServerError})
 		return
 	}
@@ -780,9 +782,9 @@ func (p *Plugin) getConnected(c *Context, w http.ResponseWriter, r *http.Request
 	}
 
 	info, err := p.getGitHubUserInfo(c.UserID)
-	if err != nil {
-		c.Log.WithError(err).Warnf("failed to get Forgejo user info")
-		p.writeAPIError(w, &APIErrorResponse{Message: "failed to get Forgejo user info", StatusCode: http.StatusInternalServerError})
+	if err != nil && err.ID != apiErrorIDNotConnected {
+		c.Log.WithError(err).Errorf("failed to get Forgejo user info")
+		p.writeAPIError(w, &APIErrorResponse{Message: fmt.Sprintf("failed to get Forgejo user info. %s", err.Message), StatusCode: err.StatusCode})
 		return
 	}
 
@@ -830,7 +832,7 @@ func (p *Plugin) getConnected(c *Context, w http.ResponseWriter, r *http.Request
 		err := p.store.Get(privateRepoStoreKey, &val)
 		if err != nil {
 			p.writeAPIError(w, &APIErrorResponse{Message: "Unable to get private repo key value", StatusCode: http.StatusInternalServerError})
-			c.Log.WithError(err).Warnf("Unable to get private repo key value")
+			c.Log.WithError(err).Errorf("Unable to get private repo key value")
 			return
 		}
 
@@ -844,7 +846,7 @@ func (p *Plugin) getConnected(c *Context, w http.ResponseWriter, r *http.Request
 			}
 			if _, err := p.store.Set(privateRepoStoreKey, []byte("1")); err != nil {
 				p.writeAPIError(w, &APIErrorResponse{Message: "unable to set private repo key value", StatusCode: http.StatusInternalServerError})
-				c.Log.WithError(err).Warnf("Unable to set private repo key value")
+				c.Log.WithError(err).Errorf("Unable to set private repo key value")
 			}
 		}
 	}
@@ -1240,7 +1242,7 @@ func (p *Plugin) getSidebarData(c *UserContext) (*SidebarContent, error) {
 func (p *Plugin) getSidebarContent(c *UserContext, w http.ResponseWriter, r *http.Request) {
 	sidebarContent, err := p.getSidebarData(c)
 	if err != nil {
-		c.Log.WithError(err).Warnf("Failed to search for the sidebar data")
+		c.Log.WithError(err).Errorf("Failed to search for the sidebar data")
 		p.writeAPIError(w, &APIErrorResponse{Message: "failed to search for the sidebar data", StatusCode: http.StatusInternalServerError})
 		return
 	}
@@ -1322,7 +1324,7 @@ func (p *Plugin) getIssueByNumber(c *UserContext, w http.ResponseWriter, r *http
 			"owner":  owner,
 			"repo":   repo,
 			"number": numberInt,
-		}).Debugf("Could not get issue")
+		}).Errorf("Could not get issue")
 		p.writeAPIError(w, &APIErrorResponse{Message: "Could not get issue", StatusCode: http.StatusInternalServerError})
 		return
 	}
@@ -1365,7 +1367,7 @@ func (p *Plugin) getPrByNumber(c *UserContext, w http.ResponseWriter, r *http.Re
 			"owner":  owner,
 			"repo":   repo,
 			"number": numberInt,
-		}).Debugf("Could not get pull request")
+		}).Errorf("Could not get pull request")
 		p.writeAPIError(w, &APIErrorResponse{Message: "Could not get pull request", StatusCode: http.StatusInternalServerError})
 		return
 	}
@@ -1387,9 +1389,19 @@ func (p *Plugin) getLabels(c *UserContext, w http.ResponseWriter, r *http.Reques
 	opt := github.ListOptions{PerPage: 50}
 
 	for {
-		labels, resp, err := githubClient.Issues.ListLabels(c.Ctx, owner, repo, &opt)
-		if err != nil {
-			c.Log.WithError(err).Warnf("Failed to list labels")
+		var labels []*github.Label
+		var resp *github.Response
+		if cErr := p.useGitHubClient(c.GHInfo, func(info *ForgejoUserInfo, token *oauth2.Token) error {
+			labels, resp, err = githubClient.Issues.ListLabels(c.Ctx, owner, repo, &opt)
+			if err != nil {
+				return err
+			}
+			return nil
+		}); cErr != nil {
+			c.Log.WithError(cErr).With(logger.LogContext{
+				"owner": owner,
+				"repo":  repo,
+			}).Errorf("Failed to list labels")
 			p.writeAPIError(w, &APIErrorResponse{Message: "Failed to fetch labels", StatusCode: http.StatusInternalServerError})
 			return
 		}
@@ -1415,9 +1427,19 @@ func (p *Plugin) getAssignees(c *UserContext, w http.ResponseWriter, r *http.Req
 	opt := github.ListOptions{PerPage: 50}
 
 	for {
-		assignees, resp, err := githubClient.Issues.ListAssignees(c.Ctx, owner, repo, &opt)
-		if err != nil {
-			c.Log.WithError(err).Warnf("Failed to list assignees")
+		var assignees []*github.User
+		var resp *github.Response
+		if cErr := p.useGitHubClient(c.GHInfo, func(info *ForgejoUserInfo, token *oauth2.Token) error {
+			assignees, resp, err = githubClient.Issues.ListAssignees(c.Ctx, owner, repo, &opt)
+			if err != nil {
+				return err
+			}
+			return nil
+		}); cErr != nil {
+			c.Log.WithError(cErr).With(logger.LogContext{
+				"owner": owner,
+				"repo":  repo,
+			}).Errorf("Failed to list assignees")
 			p.writeAPIError(w, &APIErrorResponse{Message: "Failed to fetch assignees", StatusCode: http.StatusInternalServerError})
 			return
 		}
@@ -1443,9 +1465,19 @@ func (p *Plugin) getMilestones(c *UserContext, w http.ResponseWriter, r *http.Re
 	opt := github.ListOptions{PerPage: 50}
 
 	for {
-		milestones, resp, err := githubClient.Issues.ListMilestones(c.Ctx, owner, repo, &github.MilestoneListOptions{ListOptions: opt})
-		if err != nil {
-			c.Log.WithError(err).Warnf("Failed to list milestones")
+		var milestones []*github.Milestone
+		var resp *github.Response
+		if cErr := p.useGitHubClient(c.GHInfo, func(info *ForgejoUserInfo, token *oauth2.Token) error {
+			milestones, resp, err = githubClient.Issues.ListMilestones(c.Ctx, owner, repo, &github.MilestoneListOptions{ListOptions: opt})
+			if err != nil {
+				return err
+			}
+			return nil
+		}); cErr != nil {
+			c.Log.WithError(cErr).With(logger.LogContext{
+				"owner": owner,
+				"repo":  repo,
+			}).Errorf("Failed to list milestones")
 			p.writeAPIError(w, &APIErrorResponse{Message: "Failed to fetch milestones", StatusCode: http.StatusInternalServerError})
 			return
 		}
@@ -1457,6 +1489,37 @@ func (p *Plugin) getMilestones(c *UserContext, w http.ResponseWriter, r *http.Re
 	}
 
 	p.writeJSON(w, allMilestones)
+}
+
+type RepoResponse struct {
+	Name        string          `json:"name,omitempty"`
+	FullName    string          `json:"full_name,omitempty"`
+	Permissions map[string]bool `json:"permissions,omitempty"`
+}
+
+// Only send down fields to client that are needed
+type RepositoryResponse struct {
+	DefaultRepo RepoResponse   `json:"defaultRepo,omitempty"`
+	Repos       []RepoResponse `json:"repos,omitempty"`
+}
+
+func getOrganizationList(c context.Context, userName string, githubClient *github.Client, opt github.ListOptions) ([]*github.Organization, error) {
+	var allOrgs []*github.Organization
+	for {
+		orgs, resp, err := githubClient.Organizations.List(c, userName, &opt)
+		if err != nil {
+			return nil, err
+		}
+
+		allOrgs = append(allOrgs, orgs...)
+		if resp.NextPage == 0 {
+			break
+		}
+
+		opt.Page = resp.NextPage
+	}
+
+	return allOrgs, nil
 }
 
 func getRepositoryList(c context.Context, userName string, githubClient *github.Client, opt github.ListOptions) ([]*github.Repository, error) {
@@ -1494,6 +1557,151 @@ func getRepositoryListByOrg(c context.Context, org string, githubClient *github.
 	}
 
 	return allRepos, http.StatusOK, nil
+}
+
+func (p *Plugin) getOrganizations(c *UserContext, w http.ResponseWriter, r *http.Request) {
+	var allOrgs []*github.Organization
+	org := p.getConfiguration().ForgejoOrg
+
+	if org == "" {
+		includeLoggedInUser := r.URL.Query().Get("includeLoggedInUser")
+		if includeLoggedInUser == "true" {
+			allOrgs = append(allOrgs, &github.Organization{Login: &c.GHInfo.ForgejoUsername})
+		}
+		githubClient := p.githubConnectUser(c.Context.Ctx, c.GHInfo)
+		orgList, err := getOrganizationList(c.Ctx, "", githubClient, github.ListOptions{PerPage: 50})
+		if err != nil {
+			c.Log.WithError(err).Errorf("Failed to list organizations")
+			p.writeAPIError(w, &APIErrorResponse{Message: "Failed to fetch organizations", StatusCode: http.StatusInternalServerError})
+			return
+		}
+		allOrgs = append(allOrgs, orgList...)
+	} else {
+		allOrgs = append(allOrgs, &github.Organization{Login: &org})
+	}
+	// Only send required organizations to the client
+	type OrganizationResponse struct {
+		Login string `json:"login,omitempty"`
+	}
+
+	resp := make([]*OrganizationResponse, len(allOrgs))
+	for i, r := range allOrgs {
+		resp[i] = &OrganizationResponse{
+			Login: r.GetLogin(),
+		}
+	}
+
+	p.writeJSON(w, resp)
+}
+
+func (p *Plugin) getReposByOrg(c *UserContext, w http.ResponseWriter, r *http.Request) {
+	githubClient := p.githubConnectUser(c.Context.Ctx, c.GHInfo)
+
+	opt := github.ListOptions{PerPage: 50}
+
+	orgString := r.URL.Query().Get(organisationParam)
+
+	if orgString == "" {
+		c.Log.Warnf("Organization query param is empty")
+		p.writeAPIError(w, &APIErrorResponse{Message: "Organization query parameter is empty, must include organization name ", StatusCode: http.StatusBadRequest})
+		return
+	}
+
+	channelIDString := r.URL.Query().Get(channelIDParam)
+	if channelIDString == "" {
+		c.Log.Warnf("Channel ID query param is empty")
+		p.writeAPIError(w, &APIErrorResponse{Message: "ChannelId query parameter is empty, must include Channel ID ", StatusCode: http.StatusBadRequest})
+		return
+	}
+
+	orgList := strings.Split(orgString, ",")
+	var allRepos []*github.Repository
+
+	for _, org := range orgList {
+		org = strings.TrimSpace(org)
+		if org == "" {
+			continue
+		}
+
+		var repos []*github.Repository
+		var err error
+		var statusCode int
+
+		// If an organization is the username of an authenticated user then return repos where the authenticated user is the owner
+		if org == c.GHInfo.ForgejoUsername {
+			repos, err = getRepositoryList(c.Ctx, "", githubClient, opt)
+			if err != nil {
+				c.Log.WithError(err).Errorf("Failed to list repositories for user %s", org)
+				continue
+			}
+		} else {
+			repos, statusCode, err = getRepositoryListByOrg(c.Ctx, org, githubClient, opt)
+			if err != nil {
+				if statusCode == http.StatusNotFound {
+					repos, err = getRepositoryList(c.Ctx, org, githubClient, opt)
+					if err != nil {
+						c.Log.WithError(err).Errorf("Failed to list repositories for org/user %s", org)
+						continue
+					}
+				} else {
+					c.Log.WithError(err).Warnf("Failed to list repositories for org %s", org)
+					continue
+				}
+			}
+		}
+
+		allRepos = append(allRepos, repos...)
+	}
+
+	// Only send repositories which are part of the requested organization(s)
+
+	repoResp := make([]RepoResponse, len(allRepos))
+	for i, r := range allRepos {
+		repoResp[i] = RepoResponse{
+			Name:        r.GetName(),
+			FullName:    r.GetFullName(),
+			Permissions: r.GetPermissions(),
+		}
+	}
+
+	resp := RepositoryResponse{
+		Repos: repoResp,
+	}
+
+	// Add default repo if available
+	defaultRepo, dErr := p.GetDefaultRepo(c.GHInfo.UserID, channelIDString)
+	if dErr != nil {
+		c.Log.WithError(dErr).Warnf("Failed to get the default repo for the channel. UserID: %s. ChannelID: %s", c.GHInfo.UserID, channelIDString)
+	}
+
+	if defaultRepo != "" {
+		config := p.getConfiguration()
+		baseURL := config.getBaseURL()
+		owner, repo := parseOwnerAndRepo(defaultRepo, baseURL)
+		defaultRepository, err := getRepository(c.Ctx, owner, repo, githubClient)
+		if err != nil {
+			c.Log.WithError(err).Warnf("Failed to get the default repo %s/%s", owner, repo)
+		}
+
+		if defaultRepository != nil {
+			resp.DefaultRepo = RepoResponse{
+				Name:        defaultRepository.GetName(),
+				FullName:    defaultRepository.GetFullName(),
+				Permissions: defaultRepository.Permissions,
+			}
+		}
+	}
+
+	p.writeJSON(w, resp)
+}
+
+func getRepository(c context.Context, org string, repo string, githubClient *github.Client) (*github.Repository, error) {
+	repository, _, err := githubClient.Repositories.Get(c, org, repo)
+	if err != nil {
+		return nil, err
+	}
+
+	return repository, nil
 }
 
 func (p *Plugin) getRepositories(c *UserContext, w http.ResponseWriter, r *http.Request) {
@@ -1543,13 +1751,7 @@ func (p *Plugin) getRepositories(c *UserContext, w http.ResponseWriter, r *http.
 	}
 
 	// Only send down fields to client that are needed
-	type RepositoryResponse struct {
-		Name        string          `json:"name,omitempty"`
-		FullName    string          `json:"full_name,omitempty"`
-		Permissions map[string]bool `json:"permissions,omitempty"`
-	}
-
-	resp := make([]RepositoryResponse, len(allRepos))
+	resp := make([]RepoResponse, len(allRepos))
 	for i, r := range allRepos {
 		resp[i].Name = r.GetName()
 		resp[i].FullName = r.GetFullName()
@@ -1698,7 +1900,7 @@ func (p *Plugin) createIssue(c *UserContext, w http.ResponseWriter, r *http.Requ
 		p.client.Post.SendEphemeralPost(c.UserID, reply)
 	}
 	if err != nil {
-		c.Log.WithError(err).Warnf("failed to create notification post")
+		c.Log.WithError(err).Errorf("failed to create notification post")
 		p.writeAPIError(w, &APIErrorResponse{ID: "", Message: "failed to create notification post, postID: " + issue.PostID + ", channelID: " + channelID, StatusCode: http.StatusInternalServerError})
 		return
 	}

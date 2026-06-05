@@ -451,6 +451,7 @@ Assignees: {{range $i, $el := .Assignees -}} {{- if $i}}, {{end}}{{template "FUs
 		"{{end}}{{end}}" +
 		"* `/forgejo disconnect` - Disconnect your Mattermost account from your Forgejo account\n" +
 		"* `/forgejo help` - Display Slash Command help text\n" +
+		"* `/forgejo about` - Display build details of the plugin\n" +
 		"* `/forgejo todo` - Get a list of unread messages and pull requests awaiting your review\n" +
 		"* `/forgejo subscriptions list` - Will list the current channel subscriptions\n" +
 		"* `/forgejo subscriptions add owner[/repo] [flags]` - Subscribe the current channel to receive notifications about opened pull requests and issues for an organization or repository\n" +
@@ -488,7 +489,11 @@ Assignees: {{range $i, $el := .Assignees -}} {{- if $i}}, {{end}}{{template "FUs
 		"  * `/forgejo mute list` - list your muted Forgejo users\n" +
 		"  * `/forgejo mute add [username]` - add a Forgejo user to your muted list\n" +
 		"  * `/forgejo mute delete [username]` - remove a Forgejo user from your muted list\n" +
-		"  * `/forgejo mute delete-all` - unmute all Forgejo users\n"))
+		"  * `/forgejo mute delete-all` - unmute all Forgejo users\n" +
+		"* `/forgejo default-repo` - Manage the default repository per channel for the user. The default repository will be auto selected for creating the issues\n" +
+		"  * `/forgejo default-repo set owner[/repo]` - set the default repo for the channel\n" +
+		"  * `/forgejo default-repo get` - get the default repo for the channel\n" +
+		"  * `/forgejo default-repo unset` - unset the default repo for the channel\n"))
 
 	template.Must(masterTemplate.New("newRepoStar").Funcs(funcMap).Parse(`
 {{template "repo" .GetRepo}}

@@ -3,7 +3,7 @@
 
 import {combineReducers} from 'redux';
 
-import {AttachCommentToIssueModalForPostIdData, ConfigurationData, ConnectedData, CreateIssueModalData, ForgejoUsersData, MentionsData, PrsDetailsData, ShowRhsPluginActionData, SidebarContentData, UserSettingsData, YourReposData} from '../types/forgejo_types';
+import {AttachCommentToIssueModalForPostIdData, ConfigurationData, ConnectedData, CreateIssueModalData, ForgejoUsersData, MentionsData, PrsDetailsData, ShowRhsPluginActionData, SidebarContentData, UserSettingsData, YourReposData, Organization, RepositoriesByOrg} from '../types/forgejo_types';
 
 import ActionTypes from '../action_types';
 import Constants from '../constants';
@@ -63,10 +63,15 @@ function userSettings(state = {
     }
 }
 
-function configuration(state = true, action: {type: string, data: ConnectedData | ConfigurationData}) {
+function configuration(state = {
+    left_sidebar_enabled: true,
+}, action: {type: string, data: ConnectedData | ConfigurationData}) {
     switch (action.type) {
     case ActionTypes.RECEIVED_CONNECTED:
-        return (action.data as ConnectedData).configuration;
+        return {
+            ...state,
+            ...(action.data as ConnectedData).configuration,
+        };
     case ActionTypes.RECEIVED_CONFIGURATION:
         return action.data as ConfigurationData;
     default:
@@ -133,7 +138,7 @@ function mentions(state: MentionsData[] = [], action: {type: string, data: Menti
     }
 }
 
-function forgejoUsers(state: Record<string, ForgejoUsersData> = {}, action: {type: string, data: ForgejoUsersData, userID: string}) {
+function forgejoUsers(state: Record<string, ForgejoUsersData | undefined> = {}, action: {type: string, data: ForgejoUsersData, userID: string}) {
     switch (action.type) {
     case ActionTypes.RECEIVED_FORGEJO_USER: {
         const nextState = {...state};
@@ -214,7 +219,27 @@ const attachCommentToIssueModalForPostId = (state = '', action: {type: string, d
     }
 };
 
+const yourOrgs = (state: Organization[] = [], action:{type:string, data: Organization[]}) => {
+    switch (action.type) {
+    case ActionTypes.RECEIVED_ORGANIZATIONS:
+        return action.data;
+    default:
+        return state;
+    }
+};
+
+const yourReposByOrg = (state: RepositoriesByOrg[] = [], action:{type: string, data: RepositoriesByOrg[]}) => {
+    switch (action.type) {
+    case ActionTypes.RECEIVED_REPOSITORIES_BY_ORGANIZATION:
+        return action.data;
+    default:
+        return state;
+    }
+};
+
 export default combineReducers({
+    yourOrgs,
+    yourReposByOrg,
     connected,
     baseURL,
     organizations,

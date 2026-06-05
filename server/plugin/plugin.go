@@ -21,7 +21,6 @@ import (
 	"github.com/mattermost/mattermost/server/public/pluginapi"
 	"github.com/mattermost/mattermost/server/public/pluginapi/experimental/bot/logger"
 	"github.com/mattermost/mattermost/server/public/pluginapi/experimental/bot/poster"
-	"github.com/mattermost/mattermost/server/public/pluginapi/experimental/telemetry"
 )
 
 const (
@@ -47,6 +46,8 @@ const (
 	settingExclude           = "exclude"
 
 	dailySummary = "_dailySummary"
+
+	invalidTokenError = "401 Bad credentials" //#nosec G101 -- False positive
 )
 
 var (
@@ -77,9 +78,6 @@ type Plugin struct {
 	configuration *Configuration
 
 	router *mux.Router
-
-	telemetryClient telemetry.Client
-	tracker         telemetry.Tracker
 
 	BotUserID   string
 	poster      poster.Poster
@@ -114,6 +112,7 @@ func NewPlugin() *Plugin {
 		"":              p.handleHelp,
 		"settings":      p.handleSettings,
 		"issue":         p.handleIssue,
+		"default-repo":  p.handleDefaultRepo,
 	}
 
 	p.createGithubEmojiMap()
@@ -257,7 +256,6 @@ func (p *Plugin) OnActivate() error {
 	}
 
 	p.initializeAPI()
-	p.initializeTelemetry()
 
 	p.webhookBroker = NewWebhookBroker(p.sendGitHubPingEvent)
 	p.oauthBroker = NewOAuthBroker(p.sendOAuthCompleteEvent)
@@ -287,9 +285,6 @@ func (p *Plugin) OnActivate() error {
 func (p *Plugin) OnDeactivate() error {
 	p.webhookBroker.Close()
 	p.oauthBroker.Close()
-	if err := p.telemetryClient.Close(); err != nil {
-		p.client.Log.Warn("Telemetry client failed to close", "error", err.Error())
-	}
 	return nil
 }
 
@@ -297,6 +292,10 @@ func (p *Plugin) getPostPropsForReaction(reaction *model.Reaction) (org, repo st
 	post, err := p.client.Post.GetPost(reaction.PostId)
 	if err != nil {
 		p.client.Log.Debug("Error fetching post for reaction", "error", err.Error())
+		return org, repo, id, objectType, false
+	}
+
+	if post.UserId != p.BotUserID {
 		return org, repo, id, objectType, false
 	}
 
@@ -457,10 +456,6 @@ func (p *Plugin) OnInstall(c *plugin.Context, event model.OnInstallEvent) error 
 	}
 
 	return p.flowManager.StartSetupWizard(event.UserId, "")
-}
-
-func (p *Plugin) OnSendDailyTelemetry() {
-	p.SendDailyTelemetry()
 }
 
 func (p *Plugin) OnPluginClusterEvent(c *plugin.Context, ev model.PluginClusterEvent) {
@@ -676,6 +671,24 @@ func (p *Plugin) disconnectGitHubAccount(userID string) {
 		nil,
 		&model.WebsocketBroadcast{UserId: userID},
 	)
+}
+
+func (p *Plugin) useGitHubClient(info *ForgejoUserInfo, toRun func(info *ForgejoUserInfo, token *oauth2.Token) error) error {
+	err := toRun(info, info.Token)
+	if err != nil {
+		p.client.Log.Warn("Error occurred while using the Forgejo client", "error", err.Error())
+	}
+
+	if err != nil && strings.Contains(err.Error(), invalidTokenError) {
+		p.handleRevokedToken(info)
+	}
+
+	return err
+}
+
+func (p *Plugin) handleRevokedToken(info *ForgejoUserInfo) {
+	p.disconnectGitHubAccount(info.UserID)
+	p.CreateBotDMPost(info.UserID, "Your Forgejo account was disconnected due to an invalid or revoked authorization token. Reconnect your account using the `/forgejo connect` command.", "custom_git_revoked_token")
 }
 
 func (p *Plugin) openIssueCreateModal(userID string, channelID string, title string) {
@@ -979,7 +992,9 @@ func (p *Plugin) sendRefreshEvent(userID string) {
 
 	info, apiErr := p.getGitHubUserInfo(context.UserID)
 	if apiErr != nil {
-		p.client.Log.Warn("Failed to get forgejo user info", "error", apiErr.Error())
+		if apiErr.ID != apiErrorIDNotConnected {
+			p.client.Log.Debug("Failed to get forgejo user info", "error", apiErr.Error())
+		}
 		return
 	}
 

@@ -43,7 +43,12 @@ endif
 # Used for semver bumping
 PROTECTED_BRANCH := master
 APP_NAME    := $(shell basename -s .git `git config --get remote.origin.url`)
-CURRENT_VERSION := $(shell git describe --abbrev=0 --tags)
+CURRENT_VERSION := $(strip $(shell git describe --abbrev=0 --tags))
+LATEST_RELEASE_TAG_RAW := $(shell git tag -l "v*" --sort=-v:refname | grep -v '\-rc' | head -n 1 || true)
+LATEST_RELEASE_TAG := $(strip $(LATEST_RELEASE_TAG_RAW))
+ifeq ($(LATEST_RELEASE_TAG),)
+LATEST_RELEASE_TAG := $(CURRENT_VERSION)
+endif
 VERSION_PARTS := $(subst ., ,$(subst v,,$(subst -rc, ,$(CURRENT_VERSION))))
 MAJOR := $(word 1,$(VERSION_PARTS))
 MINOR := $(word 2,$(VERSION_PARTS))
@@ -81,6 +86,11 @@ endef
 patch: ## to bump patch version (semver)
 	$(call check_protected_branch)
 	$(call check_pending_pulls)
+	@$(eval BASE_VERSION := $(strip $(LATEST_RELEASE_TAG)))
+	@$(eval BASE_VERSION_PARTS := $(subst ., ,$(subst v,,$(subst -rc, ,$(BASE_VERSION)))))
+	@$(eval MAJOR := $(word 1,$(BASE_VERSION_PARTS)))
+	@$(eval MINOR := $(word 2,$(BASE_VERSION_PARTS)))
+	@$(eval PATCH := $(word 3,$(BASE_VERSION_PARTS)))
 	@$(eval PATCH := $(shell echo $$(($(PATCH)+1))))
 	$(call prompt_approval,$(MAJOR).$(MINOR).$(PATCH))
 	@echo Bumping $(APP_NAME) to Patch version $(MAJOR).$(MINOR).$(PATCH)
@@ -91,6 +101,11 @@ patch: ## to bump patch version (semver)
 minor: ## to bump minor version (semver)
 	$(call check_protected_branch)
 	$(call check_pending_pulls)
+	@$(eval BASE_VERSION := $(strip $(LATEST_RELEASE_TAG)))
+	@$(eval BASE_VERSION_PARTS := $(subst ., ,$(subst v,,$(subst -rc, ,$(BASE_VERSION)))))
+	@$(eval MAJOR := $(word 1,$(BASE_VERSION_PARTS)))
+	@$(eval MINOR := $(word 2,$(BASE_VERSION_PARTS)))
+	@$(eval PATCH := $(word 3,$(BASE_VERSION_PARTS)))
 	@$(eval MINOR := $(shell echo $$(($(MINOR)+1))))
 	@$(eval PATCH := 0)
 	$(call prompt_approval,$(MAJOR).$(MINOR).$(PATCH))
@@ -102,6 +117,11 @@ minor: ## to bump minor version (semver)
 major: ## to bump major version (semver)
 	$(call check_protected_branch)
 	$(call check_pending_pulls)
+	@$(eval BASE_VERSION := $(strip $(LATEST_RELEASE_TAG)))
+	@$(eval BASE_VERSION_PARTS := $(subst ., ,$(subst v,,$(subst -rc, ,$(BASE_VERSION)))))
+	@$(eval MAJOR := $(word 1,$(BASE_VERSION_PARTS)))
+	@$(eval MINOR := $(word 2,$(BASE_VERSION_PARTS)))
+	@$(eval PATCH := $(word 3,$(BASE_VERSION_PARTS)))
 	$(eval MAJOR := $(shell echo $$(($(MAJOR)+1))))
 	$(eval MINOR := 0)
 	$(eval PATCH := 0)
@@ -158,9 +178,9 @@ apply:
 ## Install go tools
 install-go-tools:
 	@echo Installing go tools
-	$(GO) install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.59.1
+	$(GO) install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.6.0
 	$(GO) install gotest.tools/gotestsum@v1.7.0
-	$(GO) install github.com/mattermost/mattermost-govet/v2@3f08281c344327ac09364f196b15f9a81c7eff08
+	$(GO) install github.com/mattermost/mattermost-govet/v2@7d8db289e508999dfcac47b97c9490a0fec12d66
 
 ## Runs eslint and golangci-lint
 .PHONY: check-style
@@ -246,7 +266,11 @@ ifneq ($(HAS_WEBAPP),)
 	mkdir -p dist/$(PLUGIN_ID)/webapp
 	cp -r webapp/dist dist/$(PLUGIN_ID)/webapp/
 endif
-	cd dist && COPYFILE_DISABLE=1 tar -cvzf $(BUNDLE_NAME) $(PLUGIN_ID)
+ifeq ($(shell uname),Darwin)
+	cd dist && tar --disable-copyfile -cvzf $(BUNDLE_NAME) $(PLUGIN_ID)
+else
+	cd dist && tar -cvzf $(BUNDLE_NAME) $(PLUGIN_ID)
+endif
 
 	@echo plugin built at: dist/$(BUNDLE_NAME)
 

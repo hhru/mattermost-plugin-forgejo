@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/go-github/v54/github"
 	"github.com/pkg/errors"
+	"golang.org/x/oauth2"
 
 	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/mattermost/mattermost/server/public/plugin"
@@ -37,6 +38,10 @@ const (
 const (
 	PerPageValue = 50
 )
+
+var ErrNotFound = errors.New("forgejo user not found")
+
+const DefaultRepoKey string = "%s_%s-default-repo"
 
 var validFeatures = map[string]bool{
 	featureIssueCreation:      true,
@@ -177,13 +182,48 @@ func contains(s []string, e string) bool {
 	return false
 }
 
+func (p *Plugin) isValidGitHubUsername(username string, userInfo *ForgejoUserInfo) (bool, error) {
+	githubClient := p.githubConnectUser(context.Background(), userInfo)
+
+	if cErr := p.useGitHubClient(userInfo, func(userInfo *ForgejoUserInfo, token *oauth2.Token) error {
+		ghUser, _, err := githubClient.Users.Get(context.Background(), username)
+		if err != nil {
+			if gErr, ok := err.(*github.ErrorResponse); ok && gErr.Response.StatusCode == http.StatusNotFound {
+				return ErrNotFound
+			}
+
+			return err
+		}
+
+		if ghUser == nil {
+			return ErrNotFound
+		}
+
+		return nil
+	}); cErr != nil {
+		if errors.Is(cErr, ErrNotFound) {
+			return false, nil
+		}
+
+		p.client.Log.Warn("Failed to fetch user", "error", cErr.Error())
+		return false, errors.New("Failed to fetch user")
+	}
+
+	return true, nil
+}
+
 func (p *Plugin) handleMuteAdd(_ *model.CommandArgs, username string, userInfo *ForgejoUserInfo) string {
 	mutedUsernames := p.getMutedUsernames(userInfo)
 	if contains(mutedUsernames, username) {
 		return username + " is already muted"
 	}
 
-	if strings.Contains(username, ",") {
+	isValidUsername, err := p.isValidGitHubUsername(username, userInfo)
+	if err != nil {
+		return "Error occurred validating username"
+	}
+
+	if strings.Contains(username, ",") || !isValidUsername {
 		return "Invalid username provided"
 	}
 
@@ -195,7 +235,7 @@ func (p *Plugin) handleMuteAdd(_ *model.CommandArgs, username string, userInfo *
 		mutedUsers = username
 	}
 
-	_, err := p.store.Set(userInfo.UserID+"-muted-users", []byte(mutedUsers))
+	_, err = p.store.Set(userInfo.UserID+"-muted-users", []byte(mutedUsers))
 	if err != nil {
 		return "Error occurred saving list of muted users"
 	}
@@ -206,7 +246,10 @@ func (p *Plugin) handleMuteAdd(_ *model.CommandArgs, username string, userInfo *
 func (p *Plugin) handleUnmute(_ *model.CommandArgs, username string, userInfo *ForgejoUserInfo) string {
 	mutedUsernames := p.getMutedUsernames(userInfo)
 	userToMute := []string{username}
-	newMutedList := arrayDifference(mutedUsernames, userToMute)
+	newMutedList, removed := arrayDifference(mutedUsernames, userToMute)
+	if !removed {
+		return username + " is not muted"
+	}
 
 	_, err := p.store.Set(userInfo.UserID+"-muted-users", []byte(strings.Join(newMutedList, ",")))
 	if err != nil {
@@ -217,6 +260,11 @@ func (p *Plugin) handleUnmute(_ *model.CommandArgs, username string, userInfo *F
 }
 
 func (p *Plugin) handleUnmuteAll(_ *model.CommandArgs, userInfo *ForgejoUserInfo) string {
+	mutedUsernames := p.getMutedUsernames(userInfo)
+	if len(mutedUsernames) == 0 {
+		return "You have no muted users"
+	}
+
 	_, err := p.store.Set(userInfo.UserID+"-muted-users", []byte(""))
 	if err != nil {
 		return "Error occurred unmuting users"
@@ -253,18 +301,22 @@ func (p *Plugin) handleMuteCommand(_ *plugin.Context, args *model.CommandArgs, p
 }
 
 // Returns the elements in a, that are not in b
-func arrayDifference(a, b []string) []string {
+func arrayDifference(a, b []string) ([]string, bool) {
 	mb := make(map[string]struct{}, len(b))
 	for _, x := range b {
 		mb[x] = struct{}{}
 	}
+
 	var diff []string
+	removed := false
 	for _, x := range a {
 		if _, found := mb[x]; !found {
 			diff = append(diff, x)
+		} else {
+			removed = true
 		}
 	}
-	return diff
+	return diff, removed
 }
 
 func (p *Plugin) handleSubscribe(c *plugin.Context, args *model.CommandArgs, parameters []string, userInfo *ForgejoUserInfo) string {
@@ -565,8 +617,12 @@ func (p *Plugin) handleUnsubscribe(_ *plugin.Context, args *model.CommandArgs, p
 
 	owner = strings.ToLower(owner)
 	repo = strings.ToLower(repo)
-	if err := p.Unsubscribe(args.ChannelId, repo, owner); err != nil {
-		p.client.Log.Warn("Failed to unsubscribe", "repo", repo, "error", err.Error())
+	if sErr := p.Unsubscribe(args.ChannelId, repo, owner); sErr != nil {
+		if sErr.Code == SubscriptionNotFound {
+			return sErr.Error.Error()
+		}
+
+		p.client.Log.Warn("Failed to unsubscribe", "repo", repo, "error", sErr.Error.Error())
 		return "Encountered an error trying to unsubscribe. Please try again."
 	}
 
@@ -736,6 +792,125 @@ func (p *Plugin) handleIssue(_ *plugin.Context, args *model.CommandArgs, paramet
 	}
 }
 
+func (p *Plugin) handleDefaultRepo(c *plugin.Context, args *model.CommandArgs, parameters []string, userInfo *ForgejoUserInfo) string {
+	if len(parameters) == 0 {
+		return "Invalid action. Available actions are 'set', 'get' and 'unset'."
+	}
+
+	command := parameters[0]
+	parameters = parameters[1:]
+
+	switch {
+	case command == "set":
+		return p.handleSetDefaultRepo(args, parameters, userInfo)
+	case command == "get":
+		return p.handleGetDefaultRepo(args, userInfo)
+	case command == "unset":
+		return p.handleUnSetDefaultRepo(args, userInfo)
+	default:
+		return fmt.Sprintf("Unknown subcommand %v", command)
+	}
+}
+
+func (p *Plugin) handleSetDefaultRepo(args *model.CommandArgs, parameters []string, userInfo *ForgejoUserInfo) string {
+	if len(parameters) == 0 {
+		return "Please specify a repository."
+	}
+
+	repo := parameters[0]
+	config := p.getConfiguration()
+	baseURL := config.getBaseURL()
+	owner, repo := parseOwnerAndRepo(repo, baseURL)
+	if owner == "" || repo == "" {
+		return "Please provide a valid repository"
+	}
+
+	owner = strings.ToLower(owner)
+	repo = strings.ToLower(repo)
+
+	if config.ForgejoOrg != "" && !p.isOrgInLockedOrgs(config.ForgejoOrg, owner) {
+		return fmt.Sprintf("Repository is not part of the locked Forgejo organization. Locked Forgejo organizations: %s", config.ForgejoOrg)
+	}
+
+	ctx := context.Background()
+	githubClient := p.githubConnectUser(ctx, userInfo)
+
+	ghRepo, _, err := githubClient.Repositories.Get(ctx, owner, repo)
+	if err != nil {
+		return "Error occurred while getting Forgejo repository details"
+	}
+	if ghRepo == nil {
+		return fmt.Sprintf("Unknown repository %s", fullNameFromOwnerAndRepo(owner, repo))
+	}
+
+	if _, err := p.store.Set(fmt.Sprintf(DefaultRepoKey, args.ChannelId, userInfo.UserID), []byte(fmt.Sprintf("%s/%s", owner, repo))); err != nil {
+		return "Error occurred saving the default repo"
+	}
+
+	repoLink := fmt.Sprintf("%s%s/%s", baseURL, owner, repo)
+	successMsg := fmt.Sprintf("The default repo has been set to [%s/%s](%s) for this channel", owner, repo, repoLink)
+
+	return successMsg
+}
+
+func (p *Plugin) GetDefaultRepo(userID, channelID string) (string, error) {
+	var defaultRepoBytes []byte
+	if err := p.store.Get(fmt.Sprintf(DefaultRepoKey, channelID, userID), &defaultRepoBytes); err != nil {
+		return "", err
+	}
+
+	return string(defaultRepoBytes), nil
+}
+
+func (p *Plugin) handleGetDefaultRepo(args *model.CommandArgs, userInfo *ForgejoUserInfo) string {
+	defaultRepo, err := p.GetDefaultRepo(userInfo.UserID, args.ChannelId)
+	if err != nil {
+		p.client.Log.Warn("Not able to get the default repo", "UserID", userInfo.UserID, "ChannelID", args.ChannelId, "Error", err.Error())
+		return "Error occurred while getting the default repo"
+	}
+
+	if defaultRepo == "" {
+		return "You have not set a default repository for this channel"
+	}
+
+	config := p.getConfiguration()
+	repoLink := config.getBaseURL() + defaultRepo
+	return fmt.Sprintf("The default repository is [%s](%s)", defaultRepo, repoLink)
+}
+
+func (p *Plugin) handleUnSetDefaultRepo(args *model.CommandArgs, userInfo *ForgejoUserInfo) string {
+	defaultRepo, err := p.GetDefaultRepo(userInfo.UserID, args.ChannelId)
+	if err != nil {
+		p.client.Log.Warn("Not able to get the default repo", "UserID", userInfo.UserID, "ChannelID", args.ChannelId, "Error", err.Error())
+		return "Error occurred while getting the default repo"
+	}
+
+	if defaultRepo == "" {
+		return "You have not set a default repository for this channel"
+	}
+
+	if err := p.store.Delete(fmt.Sprintf(DefaultRepoKey, args.ChannelId, userInfo.UserID)); err != nil {
+		return "Error occurred while unsetting the repo for this channel"
+	}
+
+	return "The default repository has been unset successfully"
+}
+
+func (p *Plugin) isOrgInLockedOrgs(configuredOrgs, owner string) bool {
+	if configuredOrgs == "" {
+		return true
+	}
+
+	orgs := strings.Split(configuredOrgs, ",")
+	for _, org := range orgs {
+		if strings.EqualFold(strings.TrimSpace(org), strings.TrimSpace(owner)) {
+			return true
+		}
+	}
+
+	return false
+}
+
 func (p *Plugin) handleSetup(_ *plugin.Context, args *model.CommandArgs, parameters []string) string {
 	userID := args.UserId
 	isSysAdmin, err := p.isAuthorizedSysAdmin(userID)
@@ -808,6 +983,14 @@ func (p *Plugin) ExecuteCommand(c *plugin.Context, args *model.CommandArgs) (*mo
 
 	if action == "setup" {
 		message := p.handleSetup(c, args, parameters)
+		if message != "" {
+			p.postCommandResponse(args, message)
+		}
+		return &model.CommandResponse{}, nil
+	}
+
+	if action == "help" {
+		message := p.handleHelp(c, args, parameters, nil)
 		if message != "" {
 			p.postCommandResponse(args, message)
 		}
@@ -902,10 +1085,13 @@ func getAutocompleteData(config *Configuration) *model.AutocompleteData {
 		about := command.BuildInfoAutocomplete("about")
 		forgejo.AddCommand(about)
 
+		help := model.NewAutocompleteData("help", "", "Display Slash Command help text")
+		forgejo.AddCommand(help)
+
 		return forgejo
 	}
 
-	forgejo := model.NewAutocompleteData("forgejo", "[command]", "Available commands: connect, disconnect, todo, subscriptions, issue, me, mute, settings, help, about")
+	forgejo := model.NewAutocompleteData("forgejo", "[command]", "Available commands: connect, disconnect, todo, subscriptions, issue, default-repo, me, mute, settings, help, about")
 
 	connect := model.NewAutocompleteData("connect", "", "Connect your Mattermost account to your Forgejo account")
 	if config.EnablePrivateRepo {
@@ -977,6 +1163,20 @@ func getAutocompleteData(config *Configuration) *model.AutocompleteData {
 	issue.AddCommand(issueCreate)
 
 	forgejo.AddCommand(issue)
+
+	defaultRepo := model.NewAutocompleteData("default-repo", "[command]", "Available commands: set, get, unset")
+	defaultRepoSet := model.NewAutocompleteData("set", "[owner/repo]", "Set the default repository for the channel")
+	defaultRepoSet.AddTextArgument("Owner/repo to set as a default repository", "[owner/repo]", "")
+
+	defaultRepoGet := model.NewAutocompleteData("get", "", "Get the default repository already set for the channel")
+
+	defaultRepoDelete := model.NewAutocompleteData("unset", "", "Unset the default repository set for the channel")
+
+	defaultRepo.AddCommand(defaultRepoSet)
+	defaultRepo.AddCommand(defaultRepoGet)
+	defaultRepo.AddCommand(defaultRepoDelete)
+
+	forgejo.AddCommand(defaultRepo)
 
 	me := model.NewAutocompleteData("me", "", "Display the connected Forgejo account")
 	forgejo.AddCommand(me)

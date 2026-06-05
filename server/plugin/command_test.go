@@ -291,21 +291,9 @@ func TestExecuteCommand(t *testing.T) {
 		"help command": {
 			commandArgs: &model.CommandArgs{Command: "/forgejo help", ChannelId: "test-channelID", RootId: "test-rootID", UserId: "test-userID"},
 			expectedMsg: "###### Mattermost Forgejo Plugin - Slash Command Help\n",
-			SetupMockStore: func(mks *mocks.MockKvStore) {
-				mks.EXPECT().Get(gomock.Any(), gomock.Any()).DoAndReturn(func(key string, value interface{}) error {
-					// Cast the value to the appropriate type and updated it
-					if userInfoPtr, ok := value.(**ForgejoUserInfo); ok {
-						*userInfoPtr = &ForgejoUserInfo{
-							// Mock user info data
-							Token: &oauth2.Token{
-								AccessToken:  "ycbODW-BWbNBGfF7ac4T5RL5ruNm5BChCXgbkY1bWHqMt80JTkLsicQwo8de3tqfqlfMaglpgjqGOmSHeGp0dA==",
-								RefreshToken: "ycbODW-BWbNBGfF7ac4T5RL5ruNm5BChCXgbkY1bWHqMt80JTkLsicQwo8de3tqfqlfMaglpgjqGOmSHeGp0dA==",
-							},
-						}
-					}
-					return nil // no error, so return nil
-				})
-			},
+			// help is handled before fetching user info (no connected account required),
+			// so the KV store is not queried.
+			SetupMockStore: func(mks *mocks.MockKvStore) {},
 		},
 	}
 	for name, tt := range tests {
