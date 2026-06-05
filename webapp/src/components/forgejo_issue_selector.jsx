@@ -62,7 +62,7 @@ export default class ForgejoIssueSelector extends PureComponent {
     onChange = (e) => {
         const value = e ? e.value : '';
         this.props.onChange(value);
-    }
+    };
 
     isValid = () => {
         if (!this.props.required) {

@@ -48,7 +48,7 @@ export default class ForgejoLabelSelector extends PureComponent<Props> {
         }
 
         this.props.onChange(selection.map((s) => s.value));
-    }
+    };
 
     render() {
         return (
