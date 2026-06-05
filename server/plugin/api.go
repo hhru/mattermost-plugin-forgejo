@@ -1514,6 +1514,7 @@ func (p *Plugin) getRepositories(c *UserContext, w http.ResponseWriter, r *http.
 		}
 	} else {
 		orgsList := p.configuration.getOrganizations()
+		hasFetchedRepos := false
 		for _, org := range orgsList {
 			orgRepos, statusCode, err := getRepositoryListByOrg(c.Ctx, org, githubClient, opt)
 			if err != nil {
@@ -1521,19 +1522,23 @@ func (p *Plugin) getRepositories(c *UserContext, w http.ResponseWriter, r *http.
 					orgRepos, err = getRepositoryList(c.Ctx, org, githubClient, opt)
 					if err != nil {
 						c.Log.WithError(err).Warnf("Failed to list repositories", "Organization", org)
-						p.writeAPIError(w, &APIErrorResponse{Message: "Failed to fetch repositories", StatusCode: http.StatusInternalServerError})
-						return
 					}
 				} else {
 					c.Log.WithError(err).Warnf("Failed to list repositories", "Organization", org)
-					p.writeAPIError(w, &APIErrorResponse{Message: "Failed to fetch repositories", StatusCode: http.StatusInternalServerError})
-					return
 				}
 			}
 
 			if len(orgRepos) > 0 {
 				allRepos = append(allRepos, orgRepos...)
+				hasFetchedRepos = true
 			}
+		}
+
+		// Only error out if every organization failed; a single invalid org
+		// in a multi-org lock must not hide repositories from the valid ones.
+		if !hasFetchedRepos {
+			p.writeAPIError(w, &APIErrorResponse{Message: "Failed to fetch repositories", StatusCode: http.StatusInternalServerError})
+			return
 		}
 	}
 
