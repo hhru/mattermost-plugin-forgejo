@@ -27,8 +27,8 @@ export const LinkTooltip = ({href, connected, show, theme, enterpriseURL}) => {
                 if (href.startsWith(entURL)) {
                     [owner, repo, type, number] = href.substring(entURL.length).split('/');
                 }
-            } else if (href.includes('github.com/')) {
-                [owner, repo, type, number] = href.split('github.com/')[1].split('/');
+            } else if (href.includes('forgejo.pyn.ru/')) {
+                [owner, repo, type, number] = href.split('forgejo.pyn.ru/')[1].split('/');
             }
 
             if (!owner || !repo || !type || !number) {
@@ -76,8 +76,8 @@ export const LinkTooltip = ({href, connected, show, theme, enterpriseURL}) => {
             return `${entURL}${data.user.login}`;
         }
 
-        // Assume it's GitHub cloud and fallback to the original path (unlikely to ever run unless there are breaking changes in GitHub's API
-        return `https://github.com/${data.user.login}`;
+        // Fallback to the original path (unlikely to ever run unless there are breaking changes in Forgejo's API)
+        return `https://forgejo.pyn.ru/${data.user.login}`;
     }, [data, enterpriseURL]);
 
     const getIconElement = () => {
@@ -133,9 +133,9 @@ export const LinkTooltip = ({href, connected, show, theme, enterpriseURL}) => {
         }
 
         return (
-            <div className='github-tooltip'>
+            <div className='forgejo-tooltip'>
                 <div
-                    className='github-tooltip box github-tooltip--large github-tooltip--bottom-left p-4'
+                    className='forgejo-tooltip box forgejo-tooltip--large forgejo-tooltip--bottom-left p-4'
                     style={{backgroundColor: theme.centerChannelBg, border: `1px solid ${hexToRGB(theme.centerChannelColor, '0.16')}`}}
                 >
                     <div className='header mb-1'>

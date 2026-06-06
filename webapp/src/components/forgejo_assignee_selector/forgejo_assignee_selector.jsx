@@ -6,26 +6,26 @@ import PropTypes from 'prop-types';
 
 import IssueAttributeSelector from '@/components/issue_attribute_selector';
 
-export default class GithubMilestoneSelector extends PureComponent {
+export default class ForgejoAssigneeSelector extends PureComponent {
     static propTypes = {
         repoName: PropTypes.string.isRequired,
         theme: PropTypes.object.isRequired,
-        selectedMilestone: PropTypes.object,
+        selectedAssignees: PropTypes.array.isRequired,
         onChange: PropTypes.func.isRequired,
         actions: PropTypes.shape({
-            getMilestoneOptions: PropTypes.func.isRequired,
+            getAssigneeOptions: PropTypes.func.isRequired,
         }).isRequired,
     };
 
-    loadMilestones = async () => {
+    loadAssignees = async () => {
         if (this.props.repoName === '') {
             return [];
         }
 
-        const options = await this.props.actions.getMilestoneOptions(this.props.repoName);
+        const options = await this.props.actions.getAssigneeOptions(this.props.repoName);
 
         if (options.error) {
-            throw new Error('Failed to load milestones');
+            throw new Error('Failed to load assignees');
         }
 
         if (!options || !options.data) {
@@ -33,22 +33,25 @@ export default class GithubMilestoneSelector extends PureComponent {
         }
 
         return options.data.map((option) => ({
-            value: option.number,
-            label: option.title,
+            value: option.login,
+            label: option.login,
         }));
     };
+
+    onChange = (selection) => this.props.onChange(selection.map((s) => s.value));
 
     render() {
         return (
             <div className='form-group margin-bottom x3'>
                 <label className='control-label margin-bottom x2'>
-                    {'Milestone'}
+                    {'Assignees'}
                 </label>
                 <IssueAttributeSelector
                     {...this.props}
-                    isMulti={false}
-                    selection={this.props.selectedMilestone}
-                    loadOptions={this.loadMilestones}
+                    isMulti={true}
+                    onChange={this.onChange}
+                    selection={this.props.selectedAssignees}
+                    loadOptions={this.loadAssignees}
                 />
             </div>
         );

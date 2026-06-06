@@ -6,7 +6,7 @@ import {Dispatch, bindActionCreators} from 'redux';
 
 import {getLabelOptions} from '../../actions';
 
-import GithubLabelSelector from './github_label_selector';
+import ForgejoLabelSelector from './forgejo_label_selector';
 
 const mapDispatchToProps = (dispatch: Dispatch) => ({
     actions: bindActionCreators({getLabelOptions}, dispatch),
@@ -16,11 +16,11 @@ type Actions = {
     getLabelOptions: (repoName: string) => ReturnType<ReturnType<typeof getLabelOptions>>;
 };
 
-export type GitHubLabelSelectorDispatchProps = {
+export type ForgejoLabelSelectorDispatchProps = {
     actions: Actions;
 };
 
 export default connect(
     null,
     mapDispatchToProps,
-)(GithubLabelSelector);
+)(ForgejoLabelSelector);

@@ -4,15 +4,15 @@
 import {connect} from 'react-redux';
 import {bindActionCreators} from 'redux';
 
-import {getMilestoneOptions} from '../../actions';
+import {getAssigneeOptions} from '../../actions';
 
-import GithubMilestoneSelector from './github_milestone_selector.jsx';
+import ForgejoAssigneeSelector from './forgejo_assignee_selector.jsx';
 
 const mapDispatchToProps = (dispatch) => ({
-    actions: bindActionCreators({getMilestoneOptions}, dispatch),
+    actions: bindActionCreators({getAssigneeOptions}, dispatch),
 });
 
 export default connect(
     null,
     mapDispatchToProps,
-)(GithubMilestoneSelector);
+)(ForgejoAssigneeSelector);

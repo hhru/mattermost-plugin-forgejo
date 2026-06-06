@@ -5,22 +5,22 @@ import * as CSS from 'csstype';
 
 import {Theme} from 'mattermost-redux/selectors/entities/preferences';
 
-export type GithubLabel = {
+export type ForgejoLabel = {
     id: number;
     name: string;
     color: CSS.Properties;
 }
 
-type GitHubUser = {
+type ForgejoUser = {
     login: string;
 }
 
 export type Review = {
     state: string;
-    user?: GitHubUser;
+    user: ForgejoUser;
 }
 
-export type GithubItem = PrsDetailsData & {
+export type ForgejoItem = PrsDetailsData & {
     id: number;
     title: string;
     created_at: string;
@@ -30,15 +30,15 @@ export type GithubItem = PrsDetailsData & {
     updated_at: string;
     html_url: string;
     repository_url?: string;
-    user: GitHubUser;
-    owner?: GitHubUser;
+    user: ForgejoUser;
+    owner?: ForgejoUser;
     milestone?: {
         title: string;
     }
     repository?: {
         full_name: string;
     }
-    labels?: GithubLabel[];
+    labels?: ForgejoLabel[];
 
     // Assignments
     pullRequest?: unknown;
@@ -53,8 +53,8 @@ export type GithubItem = PrsDetailsData & {
     changed_files?: number;
 }
 
-export type GithubItemsProps = {
-    items: GithubItem[];
+export type ForgejoItemsProps = {
+    items: ForgejoItem[];
     theme: Theme;
 
     /** When true, render an SLA-status badge (Overdue / Due today / Due in N days) next to each item. */
@@ -72,9 +72,9 @@ export type UserSettingsData = {
 
 export type ConnectedData = {
     connected: boolean;
-    github_username: string;
-    github_client_id: string;
-    enterprise_base_url: string;
+    forgejo_username: string;
+    forgejo_client_id: string;
+    base_url: string;
     organizations: string[];
     user_settings: UserSettingsData;
     configuration: Record<string, unknown>;
@@ -94,7 +94,7 @@ export type PrsDetailsData = {
     reviews?: Review[];
 }
 
-export type GithubIssueData = {
+export type ForgejoIssueData = {
     number: number;
     repository_url: string;
 }
@@ -120,9 +120,9 @@ export type UnreadsData = {
 }
 
 export type SidebarContentData = {
-    prs: GithubIssueData[];
-    reviews: GithubIssueData[];
-    assignments: GithubIssueData[];
+    prs: ForgejoIssueData[];
+    reviews: ForgejoIssueData[];
+    assignments: ForgejoIssueData[];
     unreads: UnreadsData[];
 }
 
@@ -130,8 +130,8 @@ export type MentionsData = {
     id: number;
 }
 
-export type GithubUsersData = {
-    username?: string;
+export type ForgejoUsersData = {
+    username: string;
     last_try: number;
 }
 
@@ -172,9 +172,9 @@ export type APIError = {
 
 export type SidebarData = {
     username: string;
-    reviews: GithubIssueData[];
-    yourPrs: GithubIssueData[];
-    yourAssignments: GithubIssueData[],
+    reviews: ForgejoIssueData[];
+    yourPrs: ForgejoIssueData[];
+    yourAssignments: ForgejoIssueData[],
     unreads: UnreadsData[]
     orgs: string[],
     rhsState?: string | null,

@@ -9,7 +9,7 @@ import type {Props} from '.';
 
 export const UserAttribute = (props: Props) => {
     useMount(() => {
-        props.actions.getGitHubUser(props.id);
+        props.actions.getForgejoUser(props.id);
     });
 
     const username = props.username;
@@ -17,9 +17,9 @@ export const UserAttribute = (props: Props) => {
         return null;
     }
 
-    let baseURL = 'https://github.com';
-    if (props.enterpriseURL) {
-        baseURL = props.enterpriseURL;
+    let baseURL = 'https://forgejo.pyn.ru';
+    if (props.baseURL) {
+        baseURL = props.baseURL;
     }
 
     return (
@@ -29,7 +29,7 @@ export const UserAttribute = (props: Props) => {
                 target='_blank'
                 rel='noopener noreferrer'
             >
-                <i className='fa fa-github'/>{' ' + username}
+                <i className='fa fa-git'/>{' ' + username}
             </a>
         </div>
     );

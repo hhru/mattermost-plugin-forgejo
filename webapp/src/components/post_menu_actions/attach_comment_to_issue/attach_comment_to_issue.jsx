@@ -3,13 +3,13 @@
 
 import React from 'react';
 
-import GitHubIcon from '../../icon';
+import ForgejoIcon from '../../icon';
 
 export default function AttachCommentToIssuePostMenuAction() {
     return (
         <>
-            <GitHubIcon type='menu'/>
-            {'Attach to GitHub Issue'}
+            <ForgejoIcon type='menu'/>
+            {'Attach to Forgejo Issue'}
         </>
     );
 }

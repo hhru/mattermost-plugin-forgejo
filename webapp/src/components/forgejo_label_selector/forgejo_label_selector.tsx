@@ -7,9 +7,9 @@ import {Theme} from 'mattermost-redux/selectors/entities/preferences';
 
 import IssueAttributeSelector, {IssueAttributeSelectorSelection} from '../issue_attribute_selector';
 
-import {GitHubLabelSelectorDispatchProps} from '.';
+import {ForgejoLabelSelectorDispatchProps} from '.';
 
-type Props = GitHubLabelSelectorDispatchProps & {
+type Props = ForgejoLabelSelectorDispatchProps & {
     repoName: string;
     theme: Theme;
     selectedLabels: string[];
@@ -20,7 +20,7 @@ type Option = {
     name: string;
 };
 
-export default class GithubLabelSelector extends PureComponent<Props> {
+export default class ForgejoLabelSelector extends PureComponent<Props> {
     loadLabels = async () => {
         if (this.props.repoName === '') {
             return [];

@@ -6,7 +6,7 @@ import PropTypes from 'prop-types';
 
 import ReactSelectSetting from '@/components/react_select_setting';
 
-export default class GithubRepoSelector extends PureComponent {
+export default class ForgejoRepoSelector extends PureComponent {
     static propTypes = {
         yourOrgs: PropTypes.array.isRequired,
         yourReposByOrg: PropTypes.object,
@@ -92,7 +92,7 @@ export default class GithubRepoSelector extends PureComponent {
         const repoOptions = repos.map((repo) => ({value: repo.full_name, label: repo.name}));
 
         let orgSelector = null;
-        let helperTextForRepoSelector = 'Returns GitHub repositories connected to the user account';
+        let helperTextForRepoSelector = 'Returns Forgejo repositories connected to the user account';
 
         // If there are no organizations for authenticated user, then don't show organization selector
         if (orgOptions.length > 1) {
@@ -117,11 +117,11 @@ export default class GithubRepoSelector extends PureComponent {
                         className='help-text'
                         style={{marginBottom: '15px'}}
                     >
-                        {'Returns GitHub organizations connected to the user account'}
+                        {'Returns Forgejo organizations connected to the user account'}
                     </div>
                 </>
             );
-            helperTextForRepoSelector = 'Returns GitHub repositories under selected organizations';
+            helperTextForRepoSelector = 'Returns Forgejo repositories under selected organizations';
         }
 
         return (

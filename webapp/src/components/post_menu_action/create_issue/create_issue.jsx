@@ -3,13 +3,13 @@
 
 import React from 'react';
 
-import GitHubIcon from '../../icon';
+import ForgejoIcon from '../../icon';
 
 export default function CreateIssuePostMenuAction() {
     return (
         <>
-            <GitHubIcon type='menu'/>
-            {'Create GitHub Issue'}
+            <ForgejoIcon type='menu'/>
+            {'Create Forgejo Issue'}
         </>
     );
 }

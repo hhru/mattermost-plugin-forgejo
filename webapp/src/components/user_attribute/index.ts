@@ -10,7 +10,7 @@ import {getPluginState} from '../../selectors';
 
 import {GlobalState} from '../../types/store';
 
-import {getGitHubUser} from '../../actions';
+import {getForgejoUser} from '../../actions';
 
 import {UserAttribute} from './user_attribute';
 
@@ -21,26 +21,26 @@ type OwnProps = {
 type StateProps = {
     id: string;
     username?: string;
-    enterpriseURL: string;
+    baseURL: string;
 }
 
 function mapStateToProps(state: GlobalState, ownProps: OwnProps): StateProps {
     const mmUserId = ownProps.user ? ownProps.user.id : '';
 
     const pluginState = getPluginState(state);
-    const githubUser = pluginState.githubUsers[mmUserId];
+    const forgejoUser = pluginState.forgejoUsers[mmUserId];
 
     return {
         id: mmUserId,
-        username: githubUser?.username,
-        enterpriseURL: pluginState.enterpriseURL,
+        username: forgejoUser?.username,
+        baseURL: pluginState.baseURL,
     };
 }
 
 function mapDispatchToProps(dispatch: Dispatch) {
     return {
         actions: bindActionCreators({
-            getGitHubUser,
+            getForgejoUser,
         }, dispatch),
     };
 }

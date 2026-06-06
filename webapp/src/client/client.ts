@@ -4,7 +4,7 @@
 import {Client4} from 'mattermost-redux/client';
 import {ClientError} from '@mattermost/client';
 
-import {ConnectedData, GithubIssueData, GithubLabel, GithubUsersData, GitHubIssueCommentData, MentionsData, MilestoneData, PrsDetailsData, SidebarContentData, YourReposData, GitHubPullRequestData, ChannelRepositoriesData, RepositoryData, Organization} from '../types/github_types';
+import {ConnectedData, ForgejoIssueData, ForgejoLabel, ForgejoUsersData, GitHubIssueCommentData, MentionsData, MilestoneData, PrsDetailsData, SidebarContentData, YourReposData, GitHubPullRequestData, ChannelRepositoriesData, RepositoryData, Organization} from '../types/forgejo_types';
 
 import manifest from '../manifest';
 
@@ -49,8 +49,8 @@ export default class Client {
         return this.doGet<MentionsData[]>(`${this.url}/mentions`);
     };
 
-    getGitHubUser = async (userID: string) => {
-        return this.doPost<GithubUsersData>(`${this.url}/user`, {user_id: userID});
+    getForgejoUser = async (userID: string) => {
+        return this.doPost<ForgejoUsersData>(`${this.url}/user`, {user_id: userID});
     };
 
     getRepositories = async () => {
@@ -58,11 +58,11 @@ export default class Client {
     };
 
     getLabels = async (repo: string) => {
-        return this.doGet<GithubLabel[]>(`${this.url}/labels?repo=${repo}`);
+        return this.doGet<ForgejoLabel[]>(`${this.url}/labels?repo=${repo}`);
     };
 
     getAssignees = async (repo: string) => {
-        return this.doGet<GithubUsersData[]>(`${this.url}/assignees?repo=${repo}`);
+        return this.doGet<ForgejoUsersData[]>(`${this.url}/assignees?repo=${repo}`);
     };
 
     getMilestones = async (repo: string) => {
@@ -70,11 +70,11 @@ export default class Client {
     };
 
     createIssue = async (payload: CreateIssuePayload) => {
-        return this.doPost<GithubIssueData>(`${this.url}/createissue`, payload);
+        return this.doPost<ForgejoIssueData>(`${this.url}/createissue`, payload);
     };
 
     searchIssues = async (searchTerm: string) => {
-        return this.doGet<GithubIssueData[]>(`${this.url}/searchissues?term=${searchTerm}`);
+        return this.doGet<ForgejoIssueData[]>(`${this.url}/searchissues?term=${searchTerm}`);
     };
 
     attachCommentToIssue = async (payload: AttachCommentToIssuePayload) => {
@@ -82,7 +82,7 @@ export default class Client {
     };
 
     getIssue = async (owner: string, repo: string, issueNumber: number) => {
-        return this.doGet<GithubIssueData>(`${this.url}/issue?owner=${owner}&repo=${repo}&number=${issueNumber}`);
+        return this.doGet<ForgejoIssueData>(`${this.url}/issue?owner=${owner}&repo=${repo}&number=${issueNumber}`);
     };
 
     getPullRequest = async (owner: string, repo: string, prNumber: number) => {

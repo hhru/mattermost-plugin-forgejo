@@ -68,7 +68,7 @@ class PluginClass {
         });
         registry.registerLinkTooltipComponent(LinkTooltip);
 
-        const {showRHSPlugin} = registry.registerRightHandSidebarComponent(SidebarRight, 'GitHub');
+        const {showRHSPlugin} = registry.registerRightHandSidebarComponent(SidebarRight, 'Forgejo');
         store.dispatch(setShowRHSAction(() => store.dispatch(showRHSPlugin)));
 
         if (registry.registerRHSPluginPopoutListener) {

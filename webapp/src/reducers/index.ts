@@ -3,7 +3,7 @@
 
 import {combineReducers} from 'redux';
 
-import {AttachCommentToIssueModalForPostIdData, ConfigurationData, ConnectedData, CreateIssueModalData, GithubUsersData, MentionsData, PrsDetailsData, ShowRhsPluginActionData, SidebarContentData, UserSettingsData, YourReposData, Organization, RepositoriesByOrg} from '../types/github_types';
+import {AttachCommentToIssueModalForPostIdData, ConfigurationData, ConnectedData, CreateIssueModalData, ForgejoUsersData, MentionsData, PrsDetailsData, ShowRhsPluginActionData, SidebarContentData, UserSettingsData, YourReposData, Organization, RepositoriesByOrg} from '../types/forgejo_types';
 
 import ActionTypes from '../action_types';
 import Constants from '../constants';
@@ -17,11 +17,11 @@ function connected(state = false, action: {type: string, data: ConnectedData}) {
     }
 }
 
-function enterpriseURL(state = '', action: {type: string, data: ConnectedData}) {
+function baseURL(state = '', action: {type: string, data: ConnectedData}) {
     switch (action.type) {
     case ActionTypes.RECEIVED_CONNECTED:
-        if (action.data && action.data.enterprise_base_url) {
-            return action.data.enterprise_base_url;
+        if (action.data && action.data.base_url) {
+            return action.data.base_url;
         }
         return '';
     default:
@@ -44,7 +44,7 @@ function organizations(state: string[] = [], action: {type: string, data: Connec
 function username(state = '', action: {type: string, data: ConnectedData}) {
     switch (action.type) {
     case ActionTypes.RECEIVED_CONNECTED:
-        return action.data.github_username;
+        return action.data.forgejo_username;
     default:
         return state;
     }
@@ -83,7 +83,7 @@ function configuration(state: ConfigurationData = {
 function clientId(state = '', action: {type: string, data: ConnectedData}) {
     switch (action.type) {
     case ActionTypes.RECEIVED_CONNECTED:
-        return action.data.github_client_id;
+        return action.data.forgejo_client_id;
     default:
         return state;
     }
@@ -141,9 +141,9 @@ function mentions(state: MentionsData[] = [], action: {type: string, data: Menti
     }
 }
 
-function githubUsers(state: Record<string, GithubUsersData | undefined> = {}, action: {type: string, data: GithubUsersData, userID: string}) {
+function forgejoUsers(state: Record<string, ForgejoUsersData | undefined> = {}, action: {type: string, data: ForgejoUsersData, userID: string}) {
     switch (action.type) {
-    case ActionTypes.RECEIVED_GITHUB_USER: {
+    case ActionTypes.RECEIVED_FORGEJO_USER: {
         const nextState = {...state};
         nextState[action.userID] = action.data;
         return nextState;
@@ -244,7 +244,7 @@ export default combineReducers({
     yourOrgs,
     yourReposByOrg,
     connected,
-    enterpriseURL,
+    baseURL,
     organizations,
     username,
     userSettings,
@@ -254,7 +254,7 @@ export default combineReducers({
     yourRepos,
     yourPrDetails,
     mentions,
-    githubUsers,
+    forgejoUsers,
     rhsPluginAction,
     rhsState,
     isCreateIssueModalVisible,
