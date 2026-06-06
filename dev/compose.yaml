@@ -1,0 +1,34 @@
+services:
+  mm:
+    container_name: patched-mm
+    image: "${DOCKER_REGISTRY}/patched-mm:2025.05.12"
+    networks:
+      - mm
+    depends_on:
+      - postgres
+    ports:
+      - "8065:8065"
+      # debug ports
+      - "2345:2345"
+      - "2346:2346"
+    # for debug
+    cap_add:
+      - SYS_PTRACE
+  postgres:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: mmuser
+      POSTGRES_PASSWORD: mostest
+      POSTGRES_DB: mattermost_test
+    networks:
+      - mm
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready", "--quiet"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+networks:
+  mm:
+    driver: bridge
+

@@ -17,3 +17,4 @@ server/plugin/manifest.go
 
 # notice
 .notice-work
+dev/.env

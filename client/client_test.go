@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -56,8 +57,8 @@ func TestRoundTripper(t *testing.T) {
 func TestGetConfiguration(t *testing.T) {
 	t.Run("Valid", func(t *testing.T) {
 		config := &plugin.Configuration{
-			EnterpriseBaseURL: "http://example.org",
-			GitHubOrg:         "someOrg",
+			BaseURL:    "http://example.org",
+			ForgejoOrg: "someOrg",
 		}
 
 		b := new(bytes.Buffer)
@@ -91,7 +92,9 @@ func TestGetConfiguration(t *testing.T) {
 func TestGetToken(t *testing.T) {
 	t.Run("Valid", func(t *testing.T) {
 		token := &oauth2.Token{
-			AccessToken: "abcdef",
+			AccessToken:  "abcdef",
+			RefreshToken: "cdfafasd",
+			Expiry:       time.Now().Truncate(time.Microsecond),
 		}
 
 		b := new(bytes.Buffer)

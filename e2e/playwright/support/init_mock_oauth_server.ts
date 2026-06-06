@@ -17,7 +17,7 @@ export const runOAuthServer = async () => {
     const authorizeURLPrefix = process.env.OAUTH_AUTHORIZE_URL_PREFIX || defaultAuthorizePrefix;
 
     const mattermostSiteURL = process.env.MM_SERVICESETTINGS_SITEURL || 'http://localhost:8065';
-    const pluginId = process.env.MM_PLUGIN_ID || 'github';
+    const pluginId = process.env.MM_PLUGIN_ID || 'forgejo';
 
     const app = makeOAuthServer({
         authorizeURLPrefix,
