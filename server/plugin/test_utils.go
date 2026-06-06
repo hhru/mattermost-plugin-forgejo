@@ -42,18 +42,18 @@ type GitHubUserResponse struct {
 	Username string `json:"username"`
 }
 
-func GetMockGHUserInfo(p *Plugin) (*GitHubUserInfo, error) {
+func GetMockGHUserInfo(p *Plugin) (*ForgejoUserInfo, error) {
 	encryptionKey := "dummyEncryptKey1"
 	p.setConfiguration(&Configuration{EncryptionKey: encryptionKey})
 	encryptedToken, err := encrypt([]byte(encryptionKey), MockAccessToken)
 	if err != nil {
 		return nil, err
 	}
-	gitHubUserInfo := &GitHubUserInfo{
-		UserID:         MockUserID,
-		GitHubUsername: MockUsername,
-		Token:          &oauth2.Token{AccessToken: encryptedToken},
-		Settings:       &UserSettings{},
+	gitHubUserInfo := &ForgejoUserInfo{
+		UserID:          MockUserID,
+		ForgejoUsername: MockUsername,
+		Token:           &oauth2.Token{AccessToken: encryptedToken},
+		Settings:        &UserSettings{},
 	}
 
 	return gitHubUserInfo, nil

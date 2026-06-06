@@ -13,6 +13,7 @@ import (
 	"html"
 	"io"
 	"net/http"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -20,7 +21,6 @@ import (
 
 	"github.com/google/go-github/v54/github"
 	"github.com/microcosm-cc/bluemonday"
-	"golang.org/x/oauth2"
 
 	"github.com/mattermost/mattermost/server/public/model"
 )
@@ -34,28 +34,37 @@ const (
 	actionLabeled              = "labeled"
 	actionAssigned             = "assigned"
 
+	actionReviewed  = "reviewed"
 	actionCreated   = "created"
 	actionDeleted   = "deleted"
 	actionEdited    = "edited"
 	actionCompleted = "completed"
 
-	workflowConclusionFailure   = "failure"
-	workflowConclusionSuccess   = "success"
-	workflowConclusionCancelled = "cancelled"
-	workflowConclusionTimedOut  = "timed_out"
+	workflowJobFail    = "failure"
+	workflowJobSuccess = "success"
 
-	postPropGithubRepo       = "gh_repo"
-	postPropGithubObjectID   = "gh_object_id"
-	postPropGithubObjectType = "gh_object_type"
+	postPropForgejoRepo       = "fg_repo"
+	postPropForgejoObjectID   = "fg_object_id"
+	postPropForgejoObjectType = "fg_object_type"
 
-	githubObjectTypeIssue             = "issue"
-	githubObjectTypeIssueComment      = "issue_comment"
-	githubObjectTypePRReviewComment   = "pr_review_comment"
-	githubObjectTypeDiscussionComment = "discussion_comment"
+	forgejoObjectTypeIssue             = "issue"
+	forgejoObjectTypeIssueComment      = "issue_comment"
+	forgejoObjectTypePRReviewComment   = "pr_review_comment"
+	forgejoObjectTypeDiscussionComment = "discussion_comment"
+	forgejoEventHeader                 = "X-Forgejo-Event"
 )
 
+var eventTypeMapping = map[string]any{
+	"issue_comment":         &FIssueCommentEvent{},
+	"pull_request":          &FPullRequestEvent{},
+	"pull_request_comment":  &FPullRequestReviewCommentEvent{},
+	"pull_request_approved": &FPullRequestReviewEvent{},
+	"pull_request_rejected": &FPullRequestReviewEvent{},
+	"push":                  &FPushEvent{},
+}
+
 // RenderConfig holds various configuration options to be used in a template
-// for redering an event.
+// for rendering an event.
 type RenderConfig struct {
 	Style string
 }
@@ -100,7 +109,7 @@ func signBody(secret, body []byte) ([]byte, error) {
 	return computed.Sum(nil), nil
 }
 
-// GetEventWithRenderConfig wraps any github Event into an EventWithRenderConfig
+// GetEventWithRenderConfig wraps any forgejo Event into an EventWithRenderConfig
 // which also contains per-subscription configuration options.
 func GetEventWithRenderConfig(event any, sub *Subscription) *EventWithRenderConfig {
 	style := ""
@@ -116,16 +125,6 @@ func GetEventWithRenderConfig(event any, sub *Subscription) *EventWithRenderConf
 			Style: style,
 		},
 		Label: subscriptionLabel,
-	}
-}
-
-// Hack to convert from github.PushEventRepository to github.Repository
-func ConvertPushEventRepositoryToRepository(pushRepo *github.PushEventRepository) *github.Repository {
-	repoName := pushRepo.GetFullName()
-	private := pushRepo.GetPrivate()
-	return &github.Repository{
-		FullName: &repoName,
-		Private:  &private,
 	}
 }
 
@@ -231,9 +230,21 @@ func (p *Plugin) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	event, err := github.ParseWebHook(github.WebHookType(r), body)
+	forgejoEventHeader := r.Header.Get(forgejoEventHeader)
+	eventType, ok := eventTypeMapping[forgejoEventHeader]
+	var event any
+	if ok {
+		event = reflect.New(reflect.TypeOf(eventType).Elem()).Interface()
+		r := json.Unmarshal(body, &event)
+		err = r
+	} else {
+		e, r := github.ParseWebHook(forgejoEventHeader, body)
+		event = e
+		err = r
+	}
+
 	if err != nil {
-		p.client.Log.Debug("GitHub webhook content type should be set to \"application/json\"", "error", err.Error())
+		p.client.Log.Debug("Forgejo webhook content type should be set to \"application/json\"", "error", err.Error())
 		http.Error(w, "wrong mime-type. should be \"application/json\"", http.StatusBadRequest)
 		return
 	}
@@ -256,8 +267,10 @@ func (p *Plugin) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		handler = func() {
 			p.webhookBroker.publishPing(event, false)
 		}
-	case *github.PullRequestEvent:
-		repo = event.GetRepo()
+	case *FPullRequestEvent:
+		repo = &github.Repository{
+			Private: event.Repo.Private,
+		}
 		handler = func() {
 			p.postPullRequestEvent(event)
 			p.handlePullRequestNotification(event)
@@ -269,29 +282,36 @@ func (p *Plugin) handleWebhook(w http.ResponseWriter, r *http.Request) {
 			p.postIssueEvent(event)
 			p.handleIssueNotification(event)
 		}
-	case *github.IssueCommentEvent:
-		repo = event.GetRepo()
+	case *FIssueCommentEvent:
+		repo = &github.Repository{
+			Private: event.Repo.Private,
+		}
 		handler = func() {
 			p.postIssueCommentEvent(event)
 			p.handleCommentMentionNotification(event)
 			p.handleCommentAuthorNotification(event)
 			p.handleCommentAssigneeNotification(event)
 		}
-	case *github.PullRequestReviewEvent:
-		repo = event.GetRepo()
+	case *FPullRequestReviewEvent:
+		repo = &github.Repository{
+			Private: event.Repo.Private,
+		}
 		handler = func() {
 			p.postPullRequestReviewEvent(event)
 			p.handlePullRequestReviewNotification(event)
 		}
-	case *github.PullRequestReviewCommentEvent:
-		repo = event.GetRepo()
+	case *FPullRequestReviewCommentEvent:
+		repo = &github.Repository{
+			Private: event.Repo.Private,
+		}
 		handler = func() {
 			p.postPullRequestReviewCommentEvent(event)
-			p.handleReviewCommentMentionNotification(event)
-			p.handleReviewCommentAuthorNotification(event)
 		}
-	case *github.PushEvent:
-		repo = ConvertPushEventRepositoryToRepository(event.GetRepo())
+	case *FPushEvent:
+		repo = &github.Repository{
+			Private:  event.Repo.Private,
+			FullName: event.Repo.Name,
+		}
 		handler = func() {
 			p.postPushEvent(event)
 		}
@@ -314,11 +334,6 @@ func (p *Plugin) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		repo = event.GetRepo()
 		handler = func() {
 			p.postWorkflowJobEvent(event)
-		}
-	case *github.WorkflowRunEvent:
-		repo = event.GetRepo()
-		handler = func() {
-			p.postWorkflowRunEvent(event)
 		}
 	case *github.ReleaseEvent:
 		repo = event.GetRepo()
@@ -372,21 +387,17 @@ func (p *Plugin) permissionToRepo(userID string, ownerAndRepo string) bool {
 	ctx := context.Background()
 	githubClient := p.githubConnectUser(ctx, info)
 
-	var result *github.Repository
-	var err error
-	cErr := p.useGitHubClient(info, func(info *GitHubUserInfo, token *oauth2.Token) error {
-		if result, _, err = githubClient.Repositories.Get(ctx, owner, repo); result == nil || err != nil {
-			if err != nil {
-				p.client.Log.Warn("Failed fetch repository to check permission", "error", err.Error())
-				return err
-			}
+	if result, _, err := githubClient.Repositories.Get(ctx, owner, repo); result == nil || err != nil {
+		if err != nil {
+			p.client.Log.Warn("Failed fetch repository to check permission", "error", err.Error())
 		}
-		return nil
-	})
-	return cErr == nil && result != nil
+		return false
+	}
+
+	return true
 }
 
-func (p *Plugin) excludeConfigOrgMember(user *github.User, subscription *Subscription) bool {
+func (p *Plugin) excludeConfigOrgMember(username string, subscription *Subscription) bool {
 	if !subscription.ExcludeOrgMembers() {
 		return false
 	}
@@ -398,56 +409,34 @@ func (p *Plugin) excludeConfigOrgMember(user *github.User, subscription *Subscri
 	}
 
 	githubClient := p.githubConnectUser(context.Background(), info)
-	organization := p.getConfiguration().GitHubOrg
+	organization := p.getConfiguration().ForgejoOrg
 
-	return p.isUserOrganizationMember(githubClient, user, info, organization)
+	return p.isUserOrganizationMember(githubClient, username, organization)
 }
 
-func (p *Plugin) shouldDenyEventDueToNotOrgMember(user *github.User, subscription *Subscription) bool {
-	if !subscription.IncludeOnlyOrgMembers() {
-		return false
-	}
+func (p *Plugin) postPullRequestEvent(event *FPullRequestEvent) {
+	repo := event.Repo
 
-	githubClient, err := p.GetGitHubClient(context.Background(), subscription.CreatorID)
-	if err != nil {
-		p.client.Log.Warn("Failed to get user info", "error", err.Error())
-		return false
-	}
-
-	info, nErr := p.getGitHubUserInfo(subscription.CreatorID)
-	if nErr != nil {
-		p.client.Log.Warn("Failed to exclude org member", "error", nErr.Message)
-		return false
-	}
-
-	return !p.isUserOrganizationMember(githubClient, user, info, p.getConfiguration().GitHubOrg)
-}
-
-func (p *Plugin) postPullRequestEvent(event *github.PullRequestEvent) {
-	repo := event.GetRepo()
-
-	subs := p.GetSubscribedChannelsForRepository(repo)
+	subs := p.GetSubscribedChannelsForRepository(*repo.FullName, *repo.Private)
 	if len(subs) == 0 {
 		return
 	}
 
-	action := event.GetAction()
+	action := *event.Action
 	switch action {
 	case actionOpened,
 		actionReopened,
-		actionMarkedReadyForReview,
-		actionLabeled,
 		actionClosed:
 	default:
 		return
 	}
 
-	pr := event.GetPullRequest()
-	isPRInDraftState := pr.GetDraft()
-	eventLabel := event.GetLabel().GetName()
+	pr := *event.PullRequest
+	isPRInDraftState := *pr.Draft
+	// eventLabel := *event.Label.Name
 	labels := make([]string, len(pr.Labels))
 	for i, v := range pr.Labels {
-		labels[i] = v.GetName()
+		labels[i] = *v.Name
 	}
 
 	closedPRMessage, err := renderTemplate("closedPR", event)
@@ -475,11 +464,7 @@ func (p *Plugin) postPullRequestEvent(event *github.PullRequestEvent) {
 			}
 		}
 
-		if p.excludeConfigOrgMember(event.GetSender(), sub) {
-			continue
-		}
-
-		if p.shouldDenyEventDueToNotOrgMember(event.GetSender(), sub) {
+		if p.excludeConfigOrgMember(*event.Sender.Login, sub) {
 			continue
 		}
 
@@ -496,38 +481,34 @@ func (p *Plugin) postPullRequestEvent(event *github.PullRequestEvent) {
 			continue
 		}
 
-		repoName := strings.ToLower(repo.GetFullName())
-		prNumber := event.GetPullRequest().Number
+		repoName := strings.ToLower(*repo.FullName)
+		prNumber := event.PullRequest.Number
 
 		post := p.makeBotPost("", "custom_git_pr")
 
-		post.AddProp(postPropGithubRepo, repoName)
-		post.AddProp(postPropGithubObjectID, prNumber)
-		post.AddProp(postPropGithubObjectType, githubObjectTypeIssue)
+		post.AddProp(postPropForgejoRepo, repoName)
+		post.AddProp(postPropForgejoObjectID, prNumber)
+		post.AddProp(postPropForgejoObjectType, forgejoObjectTypeIssue)
 
-		if action == actionLabeled {
-			if label != "" && label == eventLabel {
-				pullRequestLabelledMessage, err := renderTemplate("pullRequestLabelled", event)
-				if err != nil {
-					p.client.Log.Warn("Failed to render template", "error", err.Error())
-					return
-				}
-
-				post.Message = pullRequestLabelledMessage
-			} else {
-				continue
-			}
-		}
+		// if action == actionLabeled {
+		//	if label != "" && label == eventLabel {
+		//		pullRequestLabelledMessage, err := renderTemplate("pullRequestLabelled", event)
+		//		if err != nil {
+		//			p.client.Log.Warn("Failed to render template", "error", err.Error())
+		//			return
+		//		}
+		//
+		//		post.Message = pullRequestLabelledMessage
+		//	} else {
+		//		continue
+		//	}
+		//}
 
 		if action == actionOpened {
 			prNotificationType := "newPR"
 			if isPRInDraftState {
-				if !p.configuration.GetNotificationForDraftPRs {
-					return // Draft PR notifications are disabled
-				}
 				prNotificationType = "newDraftPR"
 			}
-
 			newPRMessage, err := renderTemplate(prNotificationType, GetEventWithRenderConfig(event, sub))
 			if err != nil {
 				p.client.Log.Warn("Failed to render template", "error", err.Error())
@@ -547,15 +528,15 @@ func (p *Plugin) postPullRequestEvent(event *github.PullRequestEvent) {
 			post.Message = p.sanitizeDescription(reopenedPRMessage)
 		}
 
-		if action == actionMarkedReadyForReview {
-			markedReadyToReviewPRMessage, err := renderTemplate("markedReadyToReviewPR", GetEventWithRenderConfig(event, sub))
-			if err != nil {
-				p.client.Log.Warn("Failed to render template", "error", err.Error())
-				return
-			}
-
-			post.Message = p.sanitizeDescription(markedReadyToReviewPRMessage)
-		}
+		// if action == actionMarkedReadyForReview {
+		//	markedReadyToReviewPRMessage, err := renderTemplate("markedReadyToReviewPR", GetEventWithRenderConfig(event, sub))
+		//	if err != nil {
+		//		p.client.Log.Warn("Failed to render template", "error", err.Error())
+		//		return
+		//	}
+		//
+		//	post.Message = p.sanitizeDescription(markedReadyToReviewPRMessage)
+		//}
 
 		if action == actionClosed {
 			post.Message = closedPRMessage
@@ -577,15 +558,15 @@ func (p *Plugin) sanitizeDescription(description string) string {
 	return strings.TrimSpace(description)
 }
 
-func (p *Plugin) handlePRDescriptionMentionNotification(event *github.PullRequestEvent) {
-	action := event.GetAction()
+func (p *Plugin) handlePRDescriptionMentionNotification(event *FPullRequestEvent) {
+	action := *event.Action
 	if action != actionOpened {
 		return
 	}
 
-	body := event.GetPullRequest().GetBody()
+	body := *event.PullRequest.Body
 
-	mentionedUsernames := parseGitHubUsernamesFromText(body)
+	mentionedUsernames := parseForgejoUsernamesFromText(body)
 
 	message, err := renderTemplate("pullRequestMentionNotification", event)
 	if err != nil {
@@ -595,25 +576,25 @@ func (p *Plugin) handlePRDescriptionMentionNotification(event *github.PullReques
 
 	for _, username := range mentionedUsernames {
 		// Don't notify user of their own comment
-		if username == event.GetSender().GetLogin() {
+		if username == *event.Sender.Login {
 			continue
 		}
 
 		// Notifications for pull request authors are handled separately
-		if username == event.GetPullRequest().GetUser().GetLogin() {
+		if username == *event.PullRequest.User.Login {
 			continue
 		}
 
-		userID := p.getGitHubToUserIDMapping(username)
+		userID := p.getForgejoToUserIDMapping(username)
 		if userID == "" {
 			continue
 		}
 
-		if event.GetRepo().GetPrivate() && !p.permissionToRepo(userID, event.GetRepo().GetFullName()) {
+		if *event.Repo.Private && !p.permissionToRepo(userID, *event.Repo.FullName) {
 			continue
 		}
 
-		if p.senderMutedByReceiver(userID, event.GetSender().GetLogin()) {
+		if p.senderMutedByReceiver(userID, *event.Sender.Login) {
 			continue
 		}
 
@@ -644,7 +625,7 @@ func (p *Plugin) postIssueEvent(event *github.IssuesEvent) {
 		return
 	}
 
-	subscribedChannels := p.GetSubscribedChannelsForRepository(repo)
+	subscribedChannels := p.GetSubscribedChannelsForRepository(repo.GetFullName(), repo.GetPrivate())
 	if len(subscribedChannels) == 0 {
 		return
 	}
@@ -682,11 +663,7 @@ func (p *Plugin) postIssueEvent(event *github.IssuesEvent) {
 			continue
 		}
 
-		if p.excludeConfigOrgMember(event.GetSender(), sub) {
-			continue
-		}
-
-		if p.shouldDenyEventDueToNotOrgMember(event.GetSender(), sub) {
+		if p.excludeConfigOrgMember(event.GetSender().GetLogin(), sub) {
 			continue
 		}
 
@@ -702,9 +679,9 @@ func (p *Plugin) postIssueEvent(event *github.IssuesEvent) {
 		repoName := strings.ToLower(repo.GetFullName())
 		issueNumber := issue.Number
 
-		post.AddProp(postPropGithubRepo, repoName)
-		post.AddProp(postPropGithubObjectID, issueNumber)
-		post.AddProp(postPropGithubObjectType, githubObjectTypeIssue)
+		post.AddProp(postPropForgejoRepo, repoName)
+		post.AddProp(postPropForgejoObjectID, issueNumber)
+		post.AddProp(postPropForgejoObjectType, forgejoObjectTypeIssue)
 
 		label := sub.Label()
 
@@ -732,10 +709,10 @@ func (p *Plugin) postIssueEvent(event *github.IssuesEvent) {
 	}
 }
 
-func (p *Plugin) postPushEvent(event *github.PushEvent) {
-	repo := event.GetRepo()
+func (p *Plugin) postPushEvent(event *FPushEvent) {
+	repo := event.Repo
 
-	subs := p.GetSubscribedChannelsForRepository(ConvertPushEventRepositoryToRepository(repo))
+	subs := p.GetSubscribedChannelsForRepository(*repo.FullName, *repo.Private)
 
 	if len(subs) == 0 {
 		return
@@ -758,11 +735,7 @@ func (p *Plugin) postPushEvent(event *github.PushEvent) {
 			continue
 		}
 
-		if p.excludeConfigOrgMember(event.GetSender(), sub) {
-			continue
-		}
-
-		if p.shouldDenyEventDueToNotOrgMember(event.GetSender(), sub) {
+		if p.excludeConfigOrgMember(*event.Sender.Login, sub) {
 			continue
 		}
 
@@ -778,7 +751,7 @@ func (p *Plugin) postPushEvent(event *github.PushEvent) {
 func (p *Plugin) postCreateEvent(event *github.CreateEvent) {
 	repo := event.GetRepo()
 
-	subs := p.GetSubscribedChannelsForRepository(repo)
+	subs := p.GetSubscribedChannelsForRepository(repo.GetFullName(), repo.GetPrivate())
 	if len(subs) == 0 {
 		return
 	}
@@ -799,11 +772,7 @@ func (p *Plugin) postCreateEvent(event *github.CreateEvent) {
 			continue
 		}
 
-		if p.excludeConfigOrgMember(event.GetSender(), sub) {
-			continue
-		}
-
-		if p.shouldDenyEventDueToNotOrgMember(event.GetSender(), sub) {
+		if p.excludeConfigOrgMember(event.GetSender().GetLogin(), sub) {
 			continue
 		}
 
@@ -819,7 +788,7 @@ func (p *Plugin) postCreateEvent(event *github.CreateEvent) {
 func (p *Plugin) postDeleteEvent(event *github.DeleteEvent) {
 	repo := event.GetRepo()
 
-	subs := p.GetSubscribedChannelsForRepository(repo)
+	subs := p.GetSubscribedChannelsForRepository(repo.GetFullName(), repo.GetPrivate())
 
 	if len(subs) == 0 {
 		return
@@ -842,11 +811,7 @@ func (p *Plugin) postDeleteEvent(event *github.DeleteEvent) {
 			continue
 		}
 
-		if p.excludeConfigOrgMember(event.GetSender(), sub) {
-			continue
-		}
-
-		if p.shouldDenyEventDueToNotOrgMember(event.GetSender(), sub) {
+		if p.excludeConfigOrgMember(event.GetSender().GetLogin(), sub) {
 			continue
 		}
 
@@ -858,16 +823,16 @@ func (p *Plugin) postDeleteEvent(event *github.DeleteEvent) {
 	}
 }
 
-func (p *Plugin) postIssueCommentEvent(event *github.IssueCommentEvent) {
-	repo := event.GetRepo()
+func (p *Plugin) postIssueCommentEvent(event *FIssueCommentEvent) {
+	repo := event.Repo
 
-	subs := p.GetSubscribedChannelsForRepository(repo)
+	subs := p.GetSubscribedChannelsForRepository(*repo.FullName, *repo.Private)
 
 	if len(subs) == 0 {
 		return
 	}
 
-	if event.GetAction() != actionCreated {
+	if *event.Action != actionCreated {
 		return
 	}
 
@@ -877,9 +842,9 @@ func (p *Plugin) postIssueCommentEvent(event *github.IssueCommentEvent) {
 		return
 	}
 
-	labels := make([]string, len(event.GetIssue().Labels))
-	for i, v := range event.GetIssue().Labels {
-		labels[i] = v.GetName()
+	labels := make([]string, len(event.Issue.Labels))
+	for i, v := range event.Issue.Labels {
+		labels[i] = *v.Name
 	}
 
 	for _, sub := range subs {
@@ -887,11 +852,7 @@ func (p *Plugin) postIssueCommentEvent(event *github.IssueCommentEvent) {
 			continue
 		}
 
-		if p.excludeConfigOrgMember(event.GetSender(), sub) {
-			continue
-		}
-
-		if p.shouldDenyEventDueToNotOrgMember(event.GetSender(), sub) {
+		if p.excludeConfigOrgMember(*event.Sender.Login, sub) {
 			continue
 		}
 
@@ -910,14 +871,14 @@ func (p *Plugin) postIssueCommentEvent(event *github.IssueCommentEvent) {
 
 		post := p.makeBotPost("", "custom_git_comment")
 
-		repoName := strings.ToLower(repo.GetFullName())
-		commentID := event.GetComment().GetID()
+		repoName := strings.ToLower(*repo.FullName)
+		commentID := event.Comment.ID
 
-		post.AddProp(postPropGithubRepo, repoName)
-		post.AddProp(postPropGithubObjectID, commentID)
-		post.AddProp(postPropGithubObjectType, githubObjectTypeIssueComment)
+		post.AddProp(postPropForgejoRepo, repoName)
+		post.AddProp(postPropForgejoObjectID, commentID)
+		post.AddProp(postPropForgejoObjectType, forgejoObjectTypeIssueComment)
 
-		if event.GetAction() == actionCreated {
+		if *event.Action == actionCreated {
 			post.Message = message
 		}
 
@@ -950,25 +911,27 @@ func (p *Plugin) senderMutedByReceiver(userID string, sender string) bool {
 	return false
 }
 
-func (p *Plugin) postPullRequestReviewEvent(event *github.PullRequestReviewEvent) {
-	repo := event.GetRepo()
+func (p *Plugin) postPullRequestReviewEvent(event *FPullRequestReviewEvent) {
+	repo := event.Repo
 
-	subs := p.GetSubscribedChannelsForRepository(repo)
+	subs := p.GetSubscribedChannelsForRepository(*repo.FullName, *repo.Private)
 	if len(subs) == 0 {
 		return
 	}
 
-	action := event.GetAction()
-	if action != actionSubmitted {
+	switch *event.Action {
+	case actionCreated:
+	case actionReviewed:
+	default:
+		p.client.Log.Debug("Unhandled action state", "state", *event.Action)
 		return
 	}
 
-	switch event.GetReview().GetState() {
-	case "approved":
-	case "commented":
-	case "changes_requested":
+	switch *event.Review.Type {
+	case "pull_request_review_approved":
+	case "pull_request_review_rejected":
 	default:
-		p.client.Log.Debug("Unhandled review state", "state", event.GetReview().GetState())
+		p.client.Log.Debug("Unhandled review state", "state", *event.Review.Type)
 		return
 	}
 
@@ -978,9 +941,9 @@ func (p *Plugin) postPullRequestReviewEvent(event *github.PullRequestReviewEvent
 		return
 	}
 
-	labels := make([]string, len(event.GetPullRequest().Labels))
-	for i, v := range event.GetPullRequest().Labels {
-		labels[i] = v.GetName()
+	labels := make([]string, len(event.PullRequest.Labels))
+	for i, v := range event.PullRequest.Labels {
+		labels[i] = *v.Name
 	}
 
 	for _, sub := range subs {
@@ -988,11 +951,7 @@ func (p *Plugin) postPullRequestReviewEvent(event *github.PullRequestReviewEvent
 			continue
 		}
 
-		if p.excludeConfigOrgMember(event.GetSender(), sub) {
-			continue
-		}
-
-		if p.shouldDenyEventDueToNotOrgMember(event.GetSender(), sub) {
+		if p.excludeConfigOrgMember(*event.Sender.Login, sub) {
 			continue
 		}
 
@@ -1018,27 +977,23 @@ func (p *Plugin) postPullRequestReviewEvent(event *github.PullRequestReviewEvent
 	}
 }
 
-func (p *Plugin) postPullRequestReviewCommentEvent(event *github.PullRequestReviewCommentEvent) {
-	repo := event.GetRepo()
+func (p *Plugin) postPullRequestReviewCommentEvent(event *FPullRequestReviewCommentEvent) {
+	repo := *event.Repo
 
-	if event.GetAction() != actionCreated {
-		return
-	}
-
-	subs := p.GetSubscribedChannelsForRepository(repo)
+	subs := p.GetSubscribedChannelsForRepository(*repo.FullName, *repo.Private)
 	if len(subs) == 0 {
 		return
 	}
 
-	message, err := renderTemplate("newReviewComment", event)
+	newReviewMessage, err := renderTemplate("newReviewComment", event)
 	if err != nil {
 		p.client.Log.Warn("Failed to render template", "error", err.Error())
 		return
 	}
 
-	labels := make([]string, len(event.GetPullRequest().Labels))
-	for i, v := range event.GetPullRequest().Labels {
-		labels[i] = v.GetName()
+	labels := make([]string, len(event.PullRequest.Labels))
+	for i, v := range event.PullRequest.Labels {
+		labels[i] = *v.Name
 	}
 
 	for _, sub := range subs {
@@ -1046,11 +1001,7 @@ func (p *Plugin) postPullRequestReviewCommentEvent(event *github.PullRequestRevi
 			continue
 		}
 
-		if p.excludeConfigOrgMember(event.GetSender(), sub) {
-			continue
-		}
-
-		if p.shouldDenyEventDueToNotOrgMember(event.GetSender(), sub) {
+		if p.excludeConfigOrgMember(*event.Sender.Login, sub) {
 			continue
 		}
 
@@ -1067,14 +1018,14 @@ func (p *Plugin) postPullRequestReviewCommentEvent(event *github.PullRequestRevi
 			continue
 		}
 
-		post := p.makeBotPost(message, "custom_git_pr_comment")
+		post := p.makeBotPost(newReviewMessage, "custom_git_pr_comment")
 
-		repoName := strings.ToLower(repo.GetFullName())
-		commentID := event.GetComment().GetID()
+		repoName := strings.ToLower(*repo.FullName)
+		commentID := *event.PullRequest.ID
 
-		post.AddProp(postPropGithubRepo, repoName)
-		post.AddProp(postPropGithubObjectID, commentID)
-		post.AddProp(postPropGithubObjectType, githubObjectTypePRReviewComment)
+		post.AddProp(postPropForgejoRepo, repoName)
+		post.AddProp(postPropForgejoObjectID, commentID)
+		post.AddProp(postPropForgejoObjectType, forgejoObjectTypePRReviewComment)
 
 		post.ChannelId = sub.ChannelID
 		if err = p.client.Post.CreatePost(post); err != nil {
@@ -1083,111 +1034,20 @@ func (p *Plugin) postPullRequestReviewCommentEvent(event *github.PullRequestRevi
 	}
 }
 
-func (p *Plugin) handleReviewCommentMentionNotification(event *github.PullRequestReviewCommentEvent) {
-	if event.GetAction() != actionCreated {
-		return
-	}
-
-	body := event.GetComment().GetBody()
-
-	if strings.Contains(body, "notifications@github.com") {
-		body = strings.Split(body, "\n\nOn")[0]
-	}
-
-	body = mdCommentRegex.ReplaceAllString(body, "")
-
-	mentionedUsernames := parseGitHubUsernamesFromText(body)
-
-	message, err := renderTemplate("reviewCommentMentionNotification", event)
-	if err != nil {
-		p.client.Log.Warn("Failed to render template", "error", err.Error())
-		return
-	}
-
-	for _, username := range mentionedUsernames {
-		if strings.EqualFold(username, event.GetSender().GetLogin()) {
-			continue
-		}
-
-		if strings.EqualFold(username, event.GetPullRequest().GetUser().GetLogin()) {
-			continue
-		}
-
-		userID := p.getGitHubToUserIDMapping(username)
-		if userID == "" {
-			continue
-		}
-
-		if event.GetRepo().GetPrivate() && !p.permissionToRepo(userID, event.GetRepo().GetFullName()) {
-			continue
-		}
-
-		if p.senderMutedByReceiver(userID, event.GetSender().GetLogin()) {
-			continue
-		}
-
-		channel, err := p.client.Channel.GetDirect(userID, p.BotUserID)
-		if err != nil {
-			continue
-		}
-
-		post := p.makeBotPost(message, "custom_git_mention")
-		post.ChannelId = channel.Id
-		if err = p.client.Post.CreatePost(post); err != nil {
-			p.client.Log.Warn("Error creating review comment mention post", "error", err.Error())
-		}
-
-		p.sendRefreshEvent(userID)
-	}
-}
-
-func (p *Plugin) handleReviewCommentAuthorNotification(event *github.PullRequestReviewCommentEvent) {
-	author := event.GetPullRequest().GetUser().GetLogin()
-	if strings.EqualFold(author, event.GetSender().GetLogin()) {
-		return
-	}
-
-	if event.GetAction() != actionCreated {
-		return
-	}
-
-	authorUserID := p.getGitHubToUserIDMapping(author)
-	if authorUserID == "" {
-		return
-	}
-
-	if event.GetRepo().GetPrivate() && !p.permissionToRepo(authorUserID, event.GetRepo().GetFullName()) {
-		return
-	}
-
-	if p.senderMutedByReceiver(authorUserID, event.GetSender().GetLogin()) {
-		return
-	}
-
-	message, err := renderTemplate("reviewCommentAuthorNotification", event)
-	if err != nil {
-		p.client.Log.Warn("Failed to render template", "error", err.Error())
-		return
-	}
-
-	p.CreateBotDMPost(authorUserID, message, "custom_git_author")
-	p.sendRefreshEvent(authorUserID)
-}
-
-func (p *Plugin) handleCommentMentionNotification(event *github.IssueCommentEvent) {
-	action := event.GetAction()
+func (p *Plugin) handleCommentMentionNotification(event *FIssueCommentEvent) {
+	action := *event.Action
 	if action == actionEdited || action == actionDeleted {
 		return
 	}
 
-	body := event.GetComment().GetBody()
+	body := *event.Comment.Body
 
 	// Try to parse out email footer junk
-	if strings.Contains(body, "notifications@github.com") {
+	if strings.Contains(body, "notifications@forgejo.com") {
 		body = strings.Split(body, "\n\nOn")[0]
 	}
 
-	mentionedUsernames := parseGitHubUsernamesFromText(body)
+	mentionedUsernames := parseForgejoUsernamesFromText(body)
 
 	message, err := renderTemplate("commentMentionNotification", event)
 	if err != nil {
@@ -1195,7 +1055,7 @@ func (p *Plugin) handleCommentMentionNotification(event *github.IssueCommentEven
 		return
 	}
 
-	assignees := event.GetIssue().Assignees
+	assignees := event.Issue.Assignees
 
 	for _, username := range mentionedUsernames {
 		assigneeMentioned := false
@@ -1212,25 +1072,25 @@ func (p *Plugin) handleCommentMentionNotification(event *github.IssueCommentEven
 		}
 
 		// Don't notify user of their own comment
-		if username == event.GetSender().GetLogin() {
+		if username == *event.Sender.Login {
 			continue
 		}
 
 		// Notifications for issue authors are handled separately
-		if username == event.GetIssue().GetUser().GetLogin() {
+		if username == *event.Issue.User.Login {
 			continue
 		}
 
-		userID := p.getGitHubToUserIDMapping(username)
+		userID := p.getForgejoToUserIDMapping(username)
 		if userID == "" {
 			continue
 		}
 
-		if event.GetRepo().GetPrivate() && !p.permissionToRepo(userID, event.GetRepo().GetFullName()) {
+		if *event.Repo.Private && !p.permissionToRepo(userID, *event.Repo.FullName) {
 			continue
 		}
 
-		if p.senderMutedByReceiver(userID, event.GetSender().GetLogin()) {
+		if p.senderMutedByReceiver(userID, *event.Sender.Login) {
 			continue
 		}
 
@@ -1250,34 +1110,34 @@ func (p *Plugin) handleCommentMentionNotification(event *github.IssueCommentEven
 	}
 }
 
-func (p *Plugin) handleCommentAuthorNotification(event *github.IssueCommentEvent) {
-	author := event.GetIssue().GetUser().GetLogin()
-	if author == event.GetSender().GetLogin() {
+func (p *Plugin) handleCommentAuthorNotification(event *FIssueCommentEvent) {
+	author := *event.Issue.User.Login
+	if author == *event.Sender.Login {
 		return
 	}
 
-	action := event.GetAction()
+	action := *event.Action
 	if action == actionEdited || action == actionDeleted {
 		return
 	}
 
-	authorUserID := p.getGitHubToUserIDMapping(author)
+	authorUserID := p.getForgejoToUserIDMapping(author)
 	if authorUserID == "" {
 		return
 	}
 
-	if event.GetRepo().GetPrivate() && !p.permissionToRepo(authorUserID, event.GetRepo().GetFullName()) {
+	if *event.Repo.Private && !p.permissionToRepo(authorUserID, *event.Repo.FullName) {
 		return
 	}
 
-	splitURL := strings.Split(event.GetIssue().GetHTMLURL(), "/")
+	splitURL := strings.Split(*event.Issue.HTMLURL, "/")
 	if len(splitURL) < 2 {
 		return
 	}
 
 	var templateName string
 	switch splitURL[len(splitURL)-2] {
-	case "pull":
+	case "pulls":
 		templateName = "commentAuthorPullRequestNotification"
 	case "issues":
 		templateName = "commentAuthorIssueNotification"
@@ -1286,7 +1146,7 @@ func (p *Plugin) handleCommentAuthorNotification(event *github.IssueCommentEvent
 		return
 	}
 
-	if p.senderMutedByReceiver(authorUserID, event.GetSender().GetLogin()) {
+	if p.senderMutedByReceiver(authorUserID, *event.Sender.Login) {
 		p.client.Log.Debug("Commenter is muted, skipping notification")
 		return
 	}
@@ -1301,17 +1161,17 @@ func (p *Plugin) handleCommentAuthorNotification(event *github.IssueCommentEvent
 	p.sendRefreshEvent(authorUserID)
 }
 
-func (p *Plugin) handleCommentAssigneeNotification(event *github.IssueCommentEvent) {
-	action := event.GetAction()
+func (p *Plugin) handleCommentAssigneeNotification(event *FIssueCommentEvent) {
+	action := *event.Action
 	if action == actionEdited || action == actionDeleted {
 		return
 	}
 
-	author := event.GetIssue().GetUser().GetLogin()
-	assignees := event.GetIssue().Assignees
-	repoName := event.GetRepo().GetFullName()
+	author := event.Issue.User.Login
+	assignees := event.Issue.Assignees
+	repoName := event.Repo.FullName
 
-	splitURL := strings.Split(event.GetIssue().GetHTMLURL(), "/")
+	splitURL := strings.Split(*event.Issue.HTMLURL, "/")
 	if len(splitURL) < 2 {
 		return
 	}
@@ -1319,7 +1179,7 @@ func (p *Plugin) handleCommentAssigneeNotification(event *github.IssueCommentEve
 	eventType := splitURL[len(splitURL)-2]
 	var templateName string
 	switch eventType {
-	case "pull":
+	case "pulls":
 		templateName = "commentAssigneePullRequestNotification"
 	case "issues":
 		templateName = "commentAssigneeIssueNotification"
@@ -1328,7 +1188,7 @@ func (p *Plugin) handleCommentAssigneeNotification(event *github.IssueCommentEve
 		return
 	}
 
-	mentionedUsernames := parseGitHubUsernamesFromText(event.GetComment().GetBody())
+	mentionedUsernames := parseForgejoUsernamesFromText(*event.Comment.Body)
 
 	for _, assignee := range assignees {
 		template := templateName
@@ -1336,35 +1196,35 @@ func (p *Plugin) handleCommentAssigneeNotification(event *github.IssueCommentEve
 
 		if usernameMentioned {
 			switch eventType {
-			case "pull":
+			case "pulls":
 				template = "commentAssigneeSelfMentionPullRequestNotification"
 			case "issues":
 				template = "commentAssigneeSelfMentionIssueNotification"
 			}
 		}
 
-		userID := p.getGitHubToUserIDMapping(assignee.GetLogin())
+		userID := p.getForgejoToUserIDMapping(*assignee.Login)
 		if userID == "" {
 			continue
 		}
 
-		if author == assignee.GetLogin() {
+		if author == assignee.Login {
 			continue
 		}
-		if event.Sender.GetLogin() == assignee.GetLogin() {
-			continue
-		}
-
-		if !p.permissionToRepo(userID, repoName) {
+		if event.Sender.Login == assignee.Login {
 			continue
 		}
 
-		assigneeID := p.getGitHubToUserIDMapping(assignee.GetLogin())
+		if !p.permissionToRepo(userID, *repoName) {
+			continue
+		}
+
+		assigneeID := p.getForgejoToUserIDMapping(*assignee.Login)
 		if assigneeID == "" {
 			continue
 		}
 
-		if p.senderMutedByReceiver(assigneeID, event.GetSender().GetLogin()) {
+		if p.senderMutedByReceiver(assigneeID, *event.Sender.Login) {
 			p.client.Log.Debug("Commenter is muted, skipping notification")
 			continue
 		}
@@ -1379,36 +1239,32 @@ func (p *Plugin) handleCommentAssigneeNotification(event *github.IssueCommentEve
 	}
 }
 
-func (p *Plugin) handlePullRequestNotification(event *github.PullRequestEvent) {
-	author := event.GetPullRequest().GetUser().GetLogin()
-	sender := event.GetSender().GetLogin()
-	repoName := event.GetRepo().GetFullName()
-	isPrivate := event.GetRepo().GetPrivate()
+func (p *Plugin) handlePullRequestNotification(event *FPullRequestEvent) {
+	author := *event.PullRequest.User.Login
+	sender := *event.Sender.Login
+	repoName := *event.Repo.FullName
+	isPrivate := *event.Repo.Private
 
 	requestedReviewer := ""
 	requestedUserID := ""
 	authorUserID := ""
 	assigneeUserID := ""
 
-	switch event.GetAction() {
+	switch *event.Action {
 	case "review_requested":
-		requestedReviewer = event.GetRequestedReviewer().GetLogin()
-		if requestedReviewer != "" {
-			p.recordReviewRequestSLAStart(event, requestedReviewer)
-		}
+		requestedReviewer = *event.RequestedReviewer.Login
 		if requestedReviewer == sender {
 			return
 		}
-		requestedUserID = p.getGitHubToUserIDMapping(requestedReviewer)
-		if isPrivate && !p.permissionToRepo(requestedUserID, repoName) {
+		requestedUserID = p.getForgejoToUserIDMapping(requestedReviewer)
+		if p.ignoreRequestedReview(event, requestedUserID) || isPrivate && !p.permissionToRepo(requestedUserID, repoName) {
 			requestedUserID = ""
 		}
 	case actionClosed:
-		p.cleanupReviewSLAKeys(event)
 		if author == sender {
 			return
 		}
-		authorUserID = p.getGitHubToUserIDMapping(author)
+		authorUserID = p.getForgejoToUserIDMapping(author)
 		if isPrivate && !p.permissionToRepo(authorUserID, repoName) {
 			authorUserID = ""
 		}
@@ -1416,16 +1272,16 @@ func (p *Plugin) handlePullRequestNotification(event *github.PullRequestEvent) {
 		if author == sender {
 			return
 		}
-		authorUserID = p.getGitHubToUserIDMapping(author)
+		authorUserID = p.getForgejoToUserIDMapping(author)
 		if isPrivate && !p.permissionToRepo(authorUserID, repoName) {
 			authorUserID = ""
 		}
 	case actionAssigned:
-		assignee := event.GetPullRequest().GetAssignee().GetLogin()
+		assignee := *event.PullRequest.Assignee.Login
 		if assignee == sender {
 			return
 		}
-		assigneeUserID = p.getGitHubToUserIDMapping(assignee)
+		assigneeUserID = p.getForgejoToUserIDMapping(assignee)
 		if isPrivate && !p.permissionToRepo(assigneeUserID, repoName) {
 			assigneeUserID = ""
 		}
@@ -1448,6 +1304,35 @@ func (p *Plugin) handlePullRequestNotification(event *github.PullRequestEvent) {
 	p.postIssueNotification(message, sender, authorUserID, assigneeUserID)
 }
 
+func (p *Plugin) ignoreRequestedReview(event *FPullRequestEvent, requestedUserID string) bool {
+	if requestedUserID == "" || len(event.PullRequest.RequestedReviewersTeams) == 0 {
+		return false
+	}
+	reviewers := event.PullRequest.RequestedReviewers
+	if event.RequestedReviewer != nil && len(reviewers) > 0 {
+		requestedReviewer := *event.RequestedReviewer.Login
+		for _, prReviewer := range reviewers {
+			if *prReviewer.Login == requestedReviewer {
+				return false
+			}
+		}
+	}
+	userInfo, response := p.getGitHubUserInfo(requestedUserID)
+	if response != nil {
+		p.client.Log.Warn("Failed to get stored userInfo", "error", response.Error())
+		return false
+	}
+	if userInfo.Settings.DisableTeamNotifications {
+		return true
+	}
+	excludedRepos := userInfo.Settings.ExcludeTeamReviewNotifications
+	if len(excludedRepos) == 0 {
+		return false
+	}
+	currentRepo := *event.Repo.FullName
+	return slices.Contains(excludedRepos, currentRepo)
+}
+
 func (p *Plugin) handleIssueNotification(event *github.IssuesEvent) {
 	author := event.GetIssue().GetUser().GetLogin()
 	sender := event.GetSender().GetLogin()
@@ -1463,12 +1348,12 @@ func (p *Plugin) handleIssueNotification(event *github.IssuesEvent) {
 
 	switch event.GetAction() {
 	case actionClosed:
-		authorUserID = p.getGitHubToUserIDMapping(author)
+		authorUserID = p.getForgejoToUserIDMapping(author)
 		if isPrivate && !p.permissionToRepo(authorUserID, repoName) {
 			authorUserID = ""
 		}
 	case actionReopened:
-		authorUserID = p.getGitHubToUserIDMapping(author)
+		authorUserID = p.getForgejoToUserIDMapping(author)
 		if isPrivate && !p.permissionToRepo(authorUserID, repoName) {
 			authorUserID = ""
 		}
@@ -1477,7 +1362,7 @@ func (p *Plugin) handleIssueNotification(event *github.IssuesEvent) {
 		if assignee == sender {
 			return
 		}
-		assigneeUserID = p.getGitHubToUserIDMapping(assignee)
+		assigneeUserID = p.getForgejoToUserIDMapping(assignee)
 		if isPrivate && !p.permissionToRepo(assigneeUserID, repoName) {
 			assigneeUserID = ""
 		}
@@ -1507,26 +1392,27 @@ func (p *Plugin) postIssueNotification(message, sender, authorUserID, assigneeUs
 	}
 }
 
-func (p *Plugin) handlePullRequestReviewNotification(event *github.PullRequestReviewEvent) {
-	author := event.GetPullRequest().GetUser().GetLogin()
-	if author == event.GetSender().GetLogin() {
+func (p *Plugin) handlePullRequestReviewNotification(event *FPullRequestReviewEvent) {
+	author := *event.PullRequest.User.Login
+	if author == *event.Sender.Login {
 		return
 	}
 
-	if event.GetAction() != actionSubmitted {
-		return
-	}
+	// there is no such action in forgejo
+	// if *event.Action != actionSubmitted {
+	//	return
+	//}
 
-	authorUserID := p.getGitHubToUserIDMapping(author)
+	authorUserID := p.getForgejoToUserIDMapping(author)
 	if authorUserID == "" {
 		return
 	}
 
-	if event.GetRepo().GetPrivate() && !p.permissionToRepo(authorUserID, event.GetRepo().GetFullName()) {
+	if *event.Repo.Private && !p.permissionToRepo(authorUserID, *event.Repo.FullName) {
 		return
 	}
 
-	if p.senderMutedByReceiver(authorUserID, event.GetSender().GetLogin()) {
+	if p.senderMutedByReceiver(authorUserID, *event.Sender.Login) {
 		return
 	}
 
@@ -1543,7 +1429,7 @@ func (p *Plugin) handlePullRequestReviewNotification(event *github.PullRequestRe
 func (p *Plugin) postStarEvent(event *github.StarEvent) {
 	repo := event.GetRepo()
 
-	subs := p.GetSubscribedChannelsForRepository(repo)
+	subs := p.GetSubscribedChannelsForRepository(repo.GetFullName(), repo.GetPrivate())
 
 	if len(subs) == 0 {
 		return
@@ -1560,11 +1446,7 @@ func (p *Plugin) postStarEvent(event *github.StarEvent) {
 			continue
 		}
 
-		if p.excludeConfigOrgMember(event.GetSender(), sub) {
-			continue
-		}
-
-		if p.shouldDenyEventDueToNotOrgMember(event.GetSender(), sub) {
+		if p.excludeConfigOrgMember(event.GetSender().GetLogin(), sub) {
 			continue
 		}
 
@@ -1582,12 +1464,13 @@ func (p *Plugin) postWorkflowJobEvent(event *github.WorkflowJobEvent) {
 		return
 	}
 
-	if event.GetWorkflowJob().GetConclusion() != workflowConclusionFailure && event.GetWorkflowJob().GetConclusion() != workflowConclusionSuccess {
+	// Create a post only when the workflow job is completed and has either failed or succeeded
+	if event.GetWorkflowJob().GetConclusion() != workflowJobFail && event.GetWorkflowJob().GetConclusion() != workflowJobSuccess {
 		return
 	}
 
 	repo := event.GetRepo()
-	subs := p.GetSubscribedChannelsForRepository(repo)
+	subs := p.GetSubscribedChannelsForRepository(repo.GetFullName(), repo.GetPrivate())
 
 	if len(subs) == 0 {
 		return
@@ -1617,59 +1500,6 @@ func (p *Plugin) postWorkflowJobEvent(event *github.WorkflowJobEvent) {
 	}
 }
 
-func (p *Plugin) postWorkflowRunEvent(event *github.WorkflowRunEvent) {
-	if event.GetAction() != actionCompleted {
-		return
-	}
-
-	conclusion := event.GetWorkflowRun().GetConclusion()
-	isSuccess := conclusion == workflowConclusionSuccess
-	isFailure := conclusion == workflowConclusionFailure ||
-		conclusion == workflowConclusionCancelled ||
-		conclusion == workflowConclusionTimedOut
-
-	if !isSuccess && !isFailure {
-		return
-	}
-
-	repo := event.GetRepo()
-	subs := p.GetSubscribedChannelsForRepository(repo)
-	if len(subs) == 0 {
-		return
-	}
-
-	workflowRunMessage, err := renderTemplate("workflowRunCompleted", event)
-	if err != nil {
-		p.client.Log.Warn("Failed to render template", "Error", err.Error())
-		return
-	}
-
-	for _, sub := range subs {
-		if (isFailure && !sub.WorkflowRunFailures()) || (isSuccess && !sub.WorkflowRunSuccesses()) {
-			continue
-		}
-
-		if p.excludeConfigOrgMember(event.GetSender(), sub) {
-			continue
-		}
-
-		if p.shouldDenyEventDueToNotOrgMember(event.GetSender(), sub) {
-			continue
-		}
-
-		post := &model.Post{
-			UserId:    p.BotUserID,
-			Type:      "custom_git_workflow_run",
-			Message:   workflowRunMessage,
-			ChannelId: sub.ChannelID,
-		}
-
-		if err = p.client.Post.CreatePost(post); err != nil {
-			p.client.Log.Warn("Error webhook post", "channel_id", post.ChannelId, "error", err.Error())
-		}
-	}
-}
-
 func (p *Plugin) makeBotPost(message, postType string) *model.Post {
 	return &model.Post{
 		UserId:  p.BotUserID,
@@ -1684,7 +1514,7 @@ func (p *Plugin) postReleaseEvent(event *github.ReleaseEvent) {
 	}
 
 	repo := event.GetRepo()
-	subs := p.GetSubscribedChannelsForRepository(repo)
+	subs := p.GetSubscribedChannelsForRepository(repo.GetFullName(), repo.GetPrivate())
 
 	if len(subs) == 0 {
 		return
@@ -1717,7 +1547,7 @@ func (p *Plugin) postReleaseEvent(event *github.ReleaseEvent) {
 func (p *Plugin) postDiscussionEvent(event *github.DiscussionEvent) {
 	repo := event.GetRepo()
 
-	subs := p.GetSubscribedChannelsForRepository(repo)
+	subs := p.GetSubscribedChannelsForRepository(repo.GetFullName(), repo.GetPrivate())
 	if len(subs) == 0 {
 		return
 	}
@@ -1733,7 +1563,7 @@ func (p *Plugin) postDiscussionEvent(event *github.DiscussionEvent) {
 			continue
 		}
 
-		if p.excludeConfigOrgMember(event.GetSender(), sub) {
+		if p.excludeConfigOrgMember(event.GetSender().GetLogin(), sub) {
 			continue
 		}
 
@@ -1742,9 +1572,9 @@ func (p *Plugin) postDiscussionEvent(event *github.DiscussionEvent) {
 		repoName := strings.ToLower(repo.GetFullName())
 		discussionNumber := event.GetDiscussion().GetNumber()
 
-		post.AddProp(postPropGithubRepo, repoName)
-		post.AddProp(postPropGithubObjectID, discussionNumber)
-		post.AddProp(postPropGithubObjectType, "discussion")
+		post.AddProp(postPropForgejoRepo, repoName)
+		post.AddProp(postPropForgejoObjectID, discussionNumber)
+		post.AddProp(postPropForgejoObjectType, "discussion")
 		post.ChannelId = sub.ChannelID
 		if err = p.client.Post.CreatePost(post); err != nil {
 			p.client.Log.Warn("Error creating discussion notification post", "channel_id", post.ChannelId, "error", err.Error())
@@ -1755,8 +1585,12 @@ func (p *Plugin) postDiscussionEvent(event *github.DiscussionEvent) {
 func (p *Plugin) postDiscussionCommentEvent(event *github.DiscussionCommentEvent) {
 	repo := event.GetRepo()
 
-	subs := p.GetSubscribedChannelsForRepository(repo)
+	subs := p.GetSubscribedChannelsForRepository(repo.GetFullName(), repo.GetPrivate())
 	if len(subs) == 0 {
+		return
+	}
+
+	if event.GetAction() != actionCreated {
 		return
 	}
 
@@ -1770,7 +1604,7 @@ func (p *Plugin) postDiscussionCommentEvent(event *github.DiscussionCommentEvent
 			continue
 		}
 
-		if p.excludeConfigOrgMember(event.GetSender(), sub) {
+		if p.excludeConfigOrgMember(event.GetSender().GetLogin(), sub) {
 			continue
 		}
 
@@ -1779,9 +1613,9 @@ func (p *Plugin) postDiscussionCommentEvent(event *github.DiscussionCommentEvent
 		repoName := strings.ToLower(repo.GetFullName())
 		commentID := event.GetComment().GetID()
 
-		post.AddProp(postPropGithubRepo, repoName)
-		post.AddProp(postPropGithubObjectID, commentID)
-		post.AddProp(postPropGithubObjectType, githubObjectTypeDiscussionComment)
+		post.AddProp(postPropForgejoRepo, repoName)
+		post.AddProp(postPropForgejoObjectID, commentID)
+		post.AddProp(postPropForgejoObjectType, forgejoObjectTypeDiscussionComment)
 
 		post.ChannelId = sub.ChannelID
 		if err = p.client.Post.CreatePost(post); err != nil {

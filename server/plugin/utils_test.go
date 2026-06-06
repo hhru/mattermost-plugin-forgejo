@@ -5,11 +5,8 @@ package plugin
 
 import (
 	"fmt"
-	"net/http"
 	"testing"
-	"time"
 
-	"github.com/google/go-github/v54/github"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/mattermost/mattermost/server/public/model"
@@ -36,10 +33,19 @@ func TestParseGitHubUsernameFromText(t *testing.T) {
 		{Text: "@jwilander2 @jwilander", Expected: []string{"jwilander2", "jwilander"}},
 		{Text: "Hey @jwilander and @jwilander2!", Expected: []string{"jwilander", "jwilander2"}},
 		{Text: "@jwilander @jwilan--der2", Expected: []string{"jwilander"}},
+		{Text: "@my.user", Expected: []string{"my.user"}},
+		{Text: "@my.user.name", Expected: []string{"my.user.name"}},
+		{Text: "@my.user @other.user", Expected: []string{"my.user", "other.user"}},
+		{Text: "Hey @my.user and @other.user!", Expected: []string{"my.user", "other.user"}},
+		{Text: "@my.user-", Expected: []string{}},
+		{Text: "@-my.user", Expected: []string{}},
+		{Text: "@my..user", Expected: []string{}},
+		{Text: "@.my.user", Expected: []string{}},
+		{Text: "@my.user.", Expected: []string{"my.user"}},
 	}
 
 	for _, tc := range tcs {
-		assert.Equal(t, tc.Expected, parseGitHubUsernamesFromText(tc.Text))
+		assert.Equal(t, tc.Expected, parseForgejoUsernamesFromText(tc.Text))
 	}
 }
 
@@ -51,8 +57,6 @@ func TestFixGithubNotificationSubjectURL(t *testing.T) {
 	}{
 		{Text: "https://api.github.com/repos/jwilander/mattermost-webapp/issues/123", Expected: "https://github.com/jwilander/mattermost-webapp/issues/123"},
 		{Text: "https://api.github.com/repos/jwilander/mattermost-webapp/pulls/123", Expected: "https://github.com/jwilander/mattermost-webapp/pull/123"},
-		{Text: "https://enterprise.github.com/api/v3/jwilander/mattermost-webapp/issues/123", Expected: "https://enterprise.github.com/jwilander/mattermost-webapp/issues/123"},
-		{Text: "https://enterprise.github.com/api/v3/jwilander/mattermost-webapp/pull/123", Expected: "https://enterprise.github.com/jwilander/mattermost-webapp/pull/123"},
 		{Text: "https://api.github.com/repos/mattermost/mattermost-server/commits/cc6c385d3e8903546fc6fc856bf468ad09b70913", Expected: "https://github.com/mattermost/mattermost-server/commit/cc6c385d3e8903546fc6fc856bf468ad09b70913"},
 		{Text: "https://api.github.com/repos/user/rate_my_cakes/issues/comments/655139214", Expected: "https://github.com/user/rate_my_cakes/issues/4#issuecomment-655139214", IssueNum: "4"},
 	}
@@ -208,46 +212,12 @@ func TestInsideLink(t *testing.T) {
 	}
 }
 
-func TestReviewSLAMarkdown(t *testing.T) {
-	created := time.Date(2025, 3, 10, 15, 30, 0, 0, time.UTC)
-	ts := github.Timestamp{Time: created}
-
-	t.Run("disabled when target is zero", func(t *testing.T) {
-		s, overdue := reviewSLAMarkdown(ts, 0, time.Date(2025, 3, 20, 0, 0, 0, 0, time.UTC))
-		assert.Empty(t, s)
-		assert.False(t, overdue)
-	})
-
-	t.Run("overdue", func(t *testing.T) {
-		// Due March 15 (10th + 5), today March 19 -> 4 days overdue
-		now := time.Date(2025, 3, 19, 12, 0, 0, 0, time.UTC)
-		s, overdue := reviewSLAMarkdown(ts, 5, now)
-		assert.True(t, overdue)
-		assert.Contains(t, s, "4 days overdue")
-	})
-
-	t.Run("due in future", func(t *testing.T) {
-		// Due March 20 (10th + 10), today March 18 -> 2 days
-		now := time.Date(2025, 3, 18, 12, 0, 0, 0, time.UTC)
-		s, overdue := reviewSLAMarkdown(ts, 10, now)
-		assert.False(t, overdue)
-		assert.Contains(t, s, "Due in 2 days")
-	})
-
-	t.Run("due today", func(t *testing.T) {
-		now := time.Date(2025, 3, 20, 23, 59, 0, 0, time.UTC)
-		s, overdue := reviewSLAMarkdown(ts, 10, now)
-		assert.False(t, overdue)
-		assert.Contains(t, s, "Due today")
-	})
-}
-
 func TestGetToDoDisplayText(t *testing.T) {
 	type input struct {
 		title      string
 		url        string
 		notifType  string
-		repository *github.Repository
+		repository *FRepository
 	}
 	tcs := []struct {
 		name string
@@ -280,9 +250,9 @@ func TestGetToDoDisplayText(t *testing.T) {
 				"Test discussion title!",
 				"",
 				"Discussion",
-				&github.Repository{
+				&FRepository{
 					HTMLURL: model.NewPointer("https://github.com/mattermost/mattermost-plugin-github"),
-					Owner: &github.User{
+					Owner: &FUser{
 						Login: model.NewPointer("mattermost"),
 					},
 					Name: model.NewPointer("mattermost-plugin-github"),
@@ -319,114 +289,5 @@ func TestLastN(t *testing.T) {
 
 	for _, tc := range tcs {
 		assert.Equal(t, tc.Expected, lastN(tc.Text, tc.N))
-	}
-}
-
-func TestParseScopes(t *testing.T) {
-	tests := []struct {
-		name     string
-		header   string
-		expected []string
-	}{
-		{name: "empty header", header: "", expected: nil},
-		{name: "single scope", header: "repo", expected: []string{"repo"}},
-		{name: "multiple scopes", header: "repo, notifications, read:org", expected: []string{"repo", "notifications", "read:org"}},
-		{name: "public_repo only", header: "public_repo, notifications", expected: []string{"public_repo", "notifications"}},
-		{name: "extra whitespace", header: "  repo ,  notifications , read:org  ", expected: []string{"repo", "notifications", "read:org"}},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			result := parseScopes(tc.header)
-			assert.Equal(t, tc.expected, result)
-		})
-	}
-}
-
-func TestValidateOAuthScopes(t *testing.T) {
-	makeResponse := func(scopes string) *github.Response {
-		h := make(http.Header)
-		h.Set(oauthScopesHeader, scopes)
-		return &github.Response{
-			Response: &http.Response{
-				Header: h,
-			},
-		}
-	}
-
-	tests := []struct {
-		name              string
-		resp              *github.Response
-		privateAllowed    bool
-		enablePrivateRepo bool
-		expectError       bool
-	}{
-		{
-			name:              "private allowed and enabled — skip validation",
-			resp:              makeResponse("repo, notifications, read:org"),
-			privateAllowed:    true,
-			enablePrivateRepo: true,
-			expectError:       false,
-		},
-		{
-			name:              "private not allowed — public_repo is fine",
-			resp:              makeResponse("public_repo, notifications, read:org"),
-			privateAllowed:    false,
-			enablePrivateRepo: false,
-			expectError:       false,
-		},
-		{
-			name:              "private not allowed — repo scope is rejected",
-			resp:              makeResponse("repo, notifications, read:org"),
-			privateAllowed:    false,
-			enablePrivateRepo: false,
-			expectError:       true,
-		},
-		{
-			name:              "private allowed but admin disabled — repo scope is rejected",
-			resp:              makeResponse("repo, notifications, read:org"),
-			privateAllowed:    true,
-			enablePrivateRepo: false,
-			expectError:       true,
-		},
-		{
-			name:              "nil response — returns error",
-			resp:              nil,
-			privateAllowed:    false,
-			enablePrivateRepo: false,
-			expectError:       true,
-		},
-		{
-			name: "nil inner response — returns error",
-			resp: &github.Response{
-				Response: nil,
-			},
-			privateAllowed:    false,
-			enablePrivateRepo: false,
-			expectError:       true,
-		},
-		{
-			name:              "empty scope header — no error",
-			resp:              makeResponse(""),
-			privateAllowed:    false,
-			enablePrivateRepo: false,
-			expectError:       false,
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			p := NewPlugin()
-			p.setConfiguration(&Configuration{
-				EnablePrivateRepo: tc.enablePrivateRepo,
-			})
-
-			err := p.validateOAuthScopes(tc.resp, tc.privateAllowed)
-			if tc.expectError {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-			}
-		})
 	}
 }

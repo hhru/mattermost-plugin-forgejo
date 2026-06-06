@@ -17,37 +17,27 @@ func TestIsValid(t *testing.T) {
 		errMsg      string
 	}{
 		{
-			description: "valid configuration: pre-registered app",
-			config: &Configuration{
-				EncryptionKey:               "abcd",
-				UsePreregisteredApplication: true,
-			},
-		},
-		{
 			description: "valid configuration: custom OAuth app",
 			config: &Configuration{
-				GitHubOAuthClientID:         "client-id",
-				GitHubOAuthClientSecret:     "client-secret",
-				EncryptionKey:               "abcd",
-				UsePreregisteredApplication: false,
+				ForgejoOAuthClientID:     "client-id",
+				ForgejoOAuthClientSecret: "client-secret",
+				EncryptionKey:            "abcd",
 			},
 		},
 		{
 			description: "invalid configuration: custom OAuth app without credentials",
 			config: &Configuration{
-				EncryptionKey:               "abcd",
-				UsePreregisteredApplication: false,
+				EncryptionKey: "abcd",
 			},
-			errMsg: "must have a github oauth client id",
+			errMsg: "must have a forgejo oauth client id",
 		},
 		{
-			description: "invalid configuration: GitHub Enterprise URL with pre-registered app",
+			description: "invalid configuration: custom OAuth app without credentials",
 			config: &Configuration{
-				EnterpriseBaseURL:           "https://my-company.github.com",
-				UsePreregisteredApplication: true,
-				EncryptionKey:               "abcd",
+				EncryptionKey:        "abcd",
+				ForgejoOAuthClientID: "client-id",
 			},
-			errMsg: "cannot use pre-registered application with GitHub enterprise",
+			errMsg: "must have a forgejo oauth client secret",
 		},
 	} {
 		t.Run(testCase.description, func(t *testing.T) {
@@ -112,51 +102,6 @@ func TestSetDefaults(t *testing.T) {
 				assert.Len(t, c.EncryptionKey, 32)
 				assert.Len(t, c.WebhookSecret, 32)
 			},
-		}, {
-			description: "Should not set UsePreregisteredApplication in on-prem",
-			isCloud:     false,
-			config: &Configuration{
-				EncryptionKey:               "abcd",
-				WebhookSecret:               "efgh",
-				UsePreregisteredApplication: false,
-			},
-			shouldChange: false,
-			outputCheck: func(t *testing.T, c *Configuration) {
-				assert.Equal(t, "abcd", c.EncryptionKey)
-				assert.Equal(t, "efgh", c.WebhookSecret)
-			},
-		}, {
-			description: "Should set UsePreregisteredApplication in cloud if no OAuth secret is configured",
-			isCloud:     true,
-			config: &Configuration{
-				EncryptionKey:               "abcd",
-				WebhookSecret:               "efgh",
-				UsePreregisteredApplication: false,
-			},
-			shouldChange: true,
-			outputCheck: func(t *testing.T, c *Configuration) {
-				assert.Equal(t, "abcd", c.EncryptionKey)
-				assert.Equal(t, "efgh", c.WebhookSecret)
-
-				assert.True(t, c.UsePreregisteredApplication)
-			},
-		}, {
-			description: "Should set not UsePreregisteredApplication in cloud if OAuth secret is configured",
-			isCloud:     true,
-			config: &Configuration{
-				EncryptionKey:               "abcd",
-				WebhookSecret:               "efgh",
-				UsePreregisteredApplication: false,
-				GitHubOAuthClientID:         "some id",
-				GitHubOAuthClientSecret:     "some secret",
-			},
-			shouldChange: false,
-			outputCheck: func(t *testing.T, c *Configuration) {
-				assert.Equal(t, "abcd", c.EncryptionKey)
-				assert.Equal(t, "efgh", c.WebhookSecret)
-
-				assert.False(t, c.UsePreregisteredApplication)
-			},
 		},
 	} {
 		t.Run(testCase.description, func(t *testing.T) {
@@ -196,7 +141,7 @@ func TestGetOrganizations(t *testing.T) {
 
 	for _, tc := range tcs {
 		config := Configuration{
-			GitHubOrg: tc.Organizations,
+			ForgejoOrg: tc.Organizations,
 		}
 		orgList := config.getOrganizations()
 		assert.Equal(t, tc.ExpectedOrgList, orgList)

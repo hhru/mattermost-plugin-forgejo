@@ -55,7 +55,7 @@ func (p *Plugin) GenerateSupportData(_ *plugin.Context) ([]*model.FileData, erro
 
 func (p *Plugin) getConnectedUserCount() (int64, error) {
 	checker := func(key string) (keep bool, err error) {
-		return strings.HasSuffix(key, githubTokenKey), nil
+		return strings.HasSuffix(key, forgejoTokenKey), nil
 	}
 
 	var count int64

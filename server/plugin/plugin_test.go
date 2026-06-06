@@ -55,27 +55,27 @@ func TestReEncryptUserData_HappyPath(t *testing.T) {
 	encryptedToken, err := encrypt([]byte(testOldKey), MockAccessToken)
 	require.NoError(t, err)
 
-	userInfo := &GitHubUserInfo{
-		UserID:         "user1",
-		GitHubUsername: "ghuser1",
-		Token:          &oauth2.Token{AccessToken: encryptedToken},
-		Settings:       &UserSettings{},
+	userInfo := &ForgejoUserInfo{
+		UserID:          "user1",
+		ForgejoUsername: "ghuser1",
+		Token:           &oauth2.Token{AccessToken: encryptedToken},
+		Settings:        &UserSettings{},
 	}
 	userInfoBytes, err := json.Marshal(userInfo)
 	require.NoError(t, err)
 
-	mockKvStore.EXPECT().ListKeys(0, keysPerPage, gomock.Any()).Return([]string{"user1" + githubTokenKey}, nil)
+	mockKvStore.EXPECT().ListKeys(0, keysPerPage, gomock.Any()).Return([]string{"user1" + forgejoTokenKey}, nil)
 
-	mockKvStore.EXPECT().Get("user1"+githubTokenKey, gomock.Any()).DoAndReturn(
+	mockKvStore.EXPECT().Get("user1"+forgejoTokenKey, gomock.Any()).DoAndReturn(
 		func(key string, out any) error {
 			return json.Unmarshal(userInfoBytes, out)
 		},
 	)
 
-	mockKvStore.EXPECT().Set("user1"+githubTokenKey, gomock.Any()).DoAndReturn(
+	mockKvStore.EXPECT().Set("user1"+forgejoTokenKey, gomock.Any()).DoAndReturn(
 		func(key string, value any, opts ...pluginapi.KVSetOption) (bool, error) {
-			storedInfo, ok := value.(*GitHubUserInfo)
-			require.True(t, ok, "expected *GitHubUserInfo")
+			storedInfo, ok := value.(*ForgejoUserInfo)
+			require.True(t, ok, "expected *ForgejoUserInfo")
 			decrypted, decErr := decrypt([]byte(testNewKey), storedInfo.Token.AccessToken)
 			require.NoError(t, decErr)
 			require.Equal(t, MockAccessToken, decrypted)
@@ -95,27 +95,27 @@ func TestReEncryptUserData_DecryptFailure(t *testing.T) {
 	p, api, mockKvStore, ctrl := setupRotationTest(t)
 	defer ctrl.Finish()
 
-	userInfo := &GitHubUserInfo{
-		UserID:         "user1",
-		GitHubUsername: "ghuser1",
-		Token:          &oauth2.Token{AccessToken: "not-valid-base64-ciphertext!@#$"},
-		Settings:       &UserSettings{},
+	userInfo := &ForgejoUserInfo{
+		UserID:          "user1",
+		ForgejoUsername: "ghuser1",
+		Token:           &oauth2.Token{AccessToken: "not-valid-base64-ciphertext!@#$"},
+		Settings:        &UserSettings{},
 	}
 	userInfoBytes, err := json.Marshal(userInfo)
 	require.NoError(t, err)
 
-	mockKvStore.EXPECT().ListKeys(0, keysPerPage, gomock.Any()).Return([]string{"user1" + githubTokenKey}, nil)
+	mockKvStore.EXPECT().ListKeys(0, keysPerPage, gomock.Any()).Return([]string{"user1" + forgejoTokenKey}, nil)
 
-	mockKvStore.EXPECT().Get("user1"+githubTokenKey, gomock.Any()).DoAndReturn(
+	mockKvStore.EXPECT().Get("user1"+forgejoTokenKey, gomock.Any()).DoAndReturn(
 		func(key string, out any) error {
 			return json.Unmarshal(userInfoBytes, out)
 		},
 	)
 
 	// forceDisconnectUser expectations
-	mockKvStore.EXPECT().Delete("user1" + githubTokenKey).Return(nil)
-	mockKvStore.EXPECT().Delete("user1" + githubPrivateRepoKey).Return(nil)
-	mockKvStore.EXPECT().Delete("ghuser1" + githubUsernameKey).Return(nil)
+	mockKvStore.EXPECT().Delete("user1" + forgejoTokenKey).Return(nil)
+	mockKvStore.EXPECT().Delete("user1" + forgejoPrivateRepoKey).Return(nil)
+	mockKvStore.EXPECT().Delete("ghuser1" + forgejoUsernameKey).Return(nil)
 
 	api.On("LogInfo", mock.Anything, mock.Anything, mock.Anything).Maybe()
 	api.On("LogWarn", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Maybe()
@@ -140,30 +140,30 @@ func TestReEncryptUserData_StoreFailure(t *testing.T) {
 	encryptedToken, err := encrypt([]byte(testOldKey), MockAccessToken)
 	require.NoError(t, err)
 
-	userInfo := &GitHubUserInfo{
-		UserID:         "user1",
-		GitHubUsername: "ghuser1",
-		Token:          &oauth2.Token{AccessToken: encryptedToken},
-		Settings:       &UserSettings{},
+	userInfo := &ForgejoUserInfo{
+		UserID:          "user1",
+		ForgejoUsername: "ghuser1",
+		Token:           &oauth2.Token{AccessToken: encryptedToken},
+		Settings:        &UserSettings{},
 	}
 	userInfoBytes, err := json.Marshal(userInfo)
 	require.NoError(t, err)
 
-	mockKvStore.EXPECT().ListKeys(0, keysPerPage, gomock.Any()).Return([]string{"user1" + githubTokenKey}, nil)
+	mockKvStore.EXPECT().ListKeys(0, keysPerPage, gomock.Any()).Return([]string{"user1" + forgejoTokenKey}, nil)
 
-	mockKvStore.EXPECT().Get("user1"+githubTokenKey, gomock.Any()).DoAndReturn(
+	mockKvStore.EXPECT().Get("user1"+forgejoTokenKey, gomock.Any()).DoAndReturn(
 		func(key string, out any) error {
 			return json.Unmarshal(userInfoBytes, out)
 		},
 	)
 
 	// storeGitHubUserInfo fails
-	mockKvStore.EXPECT().Set("user1"+githubTokenKey, gomock.Any()).Return(false, errors.New("KV store write error"))
+	mockKvStore.EXPECT().Set("user1"+forgejoTokenKey, gomock.Any()).Return(false, errors.New("KV store write error"))
 
 	// forceDisconnectUser expectations
-	mockKvStore.EXPECT().Delete("user1" + githubTokenKey).Return(nil)
-	mockKvStore.EXPECT().Delete("user1" + githubPrivateRepoKey).Return(nil)
-	mockKvStore.EXPECT().Delete("ghuser1" + githubUsernameKey).Return(nil)
+	mockKvStore.EXPECT().Delete("user1" + forgejoTokenKey).Return(nil)
+	mockKvStore.EXPECT().Delete("user1" + forgejoPrivateRepoKey).Return(nil)
+	mockKvStore.EXPECT().Delete("ghuser1" + forgejoUsernameKey).Return(nil)
 
 	api.On("LogInfo", mock.Anything, mock.Anything, mock.Anything).Maybe()
 	api.On("LogWarn", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Maybe()
@@ -213,33 +213,33 @@ func TestReEncryptUserData_MultipleUsers(t *testing.T) {
 	enc2, err := encrypt([]byte(testOldKey), "token_user2")
 	require.NoError(t, err)
 
-	user1 := &GitHubUserInfo{
-		UserID:         "user1",
-		GitHubUsername: "ghuser1",
-		Token:          &oauth2.Token{AccessToken: enc1},
-		Settings:       &UserSettings{},
+	user1 := &ForgejoUserInfo{
+		UserID:          "user1",
+		ForgejoUsername: "ghuser1",
+		Token:           &oauth2.Token{AccessToken: enc1},
+		Settings:        &UserSettings{},
 	}
-	user2 := &GitHubUserInfo{
-		UserID:         "user2",
-		GitHubUsername: "ghuser2",
-		Token:          &oauth2.Token{AccessToken: enc2},
-		Settings:       &UserSettings{},
+	user2 := &ForgejoUserInfo{
+		UserID:          "user2",
+		ForgejoUsername: "ghuser2",
+		Token:           &oauth2.Token{AccessToken: enc2},
+		Settings:        &UserSettings{},
 	}
 	u1bytes, _ := json.Marshal(user1)
 	u2bytes, _ := json.Marshal(user2)
 
 	mockKvStore.EXPECT().ListKeys(0, keysPerPage, gomock.Any()).Return(
-		[]string{"user1" + githubTokenKey, "user2" + githubTokenKey}, nil)
+		[]string{"user1" + forgejoTokenKey, "user2" + forgejoTokenKey}, nil)
 
-	mockKvStore.EXPECT().Get("user1"+githubTokenKey, gomock.Any()).DoAndReturn(
+	mockKvStore.EXPECT().Get("user1"+forgejoTokenKey, gomock.Any()).DoAndReturn(
 		func(key string, out any) error { return json.Unmarshal(u1bytes, out) },
 	)
-	mockKvStore.EXPECT().Get("user2"+githubTokenKey, gomock.Any()).DoAndReturn(
+	mockKvStore.EXPECT().Get("user2"+forgejoTokenKey, gomock.Any()).DoAndReturn(
 		func(key string, out any) error { return json.Unmarshal(u2bytes, out) },
 	)
 
-	mockKvStore.EXPECT().Set("user1"+githubTokenKey, gomock.Any()).Return(true, nil)
-	mockKvStore.EXPECT().Set("user2"+githubTokenKey, gomock.Any()).Return(true, nil)
+	mockKvStore.EXPECT().Set("user1"+forgejoTokenKey, gomock.Any()).Return(true, nil)
+	mockKvStore.EXPECT().Set("user2"+forgejoTokenKey, gomock.Any()).Return(true, nil)
 
 	api.On("LogInfo", "Encryption key changed, re-encrypting user tokens",
 		"user_count", "2").Times(1)
@@ -256,18 +256,18 @@ func TestReEncryptUserData_AlreadyMigratedToken(t *testing.T) {
 	encryptedWithNewKey, err := encrypt([]byte(testNewKey), MockAccessToken)
 	require.NoError(t, err)
 
-	userInfo := &GitHubUserInfo{
-		UserID:         "user1",
-		GitHubUsername: "ghuser1",
-		Token:          &oauth2.Token{AccessToken: encryptedWithNewKey},
-		Settings:       &UserSettings{},
+	userInfo := &ForgejoUserInfo{
+		UserID:          "user1",
+		ForgejoUsername: "ghuser1",
+		Token:           &oauth2.Token{AccessToken: encryptedWithNewKey},
+		Settings:        &UserSettings{},
 	}
 	userInfoBytes, err := json.Marshal(userInfo)
 	require.NoError(t, err)
 
-	mockKvStore.EXPECT().ListKeys(0, keysPerPage, gomock.Any()).Return([]string{"user1" + githubTokenKey}, nil)
+	mockKvStore.EXPECT().ListKeys(0, keysPerPage, gomock.Any()).Return([]string{"user1" + forgejoTokenKey}, nil)
 
-	mockKvStore.EXPECT().Get("user1"+githubTokenKey, gomock.Any()).DoAndReturn(
+	mockKvStore.EXPECT().Get("user1"+forgejoTokenKey, gomock.Any()).DoAndReturn(
 		func(key string, out any) error {
 			return json.Unmarshal(userInfoBytes, out)
 		},
@@ -285,9 +285,9 @@ func TestForceDisconnectUser_CleansUpAndNotifies(t *testing.T) {
 	p, api, mockKvStore, ctrl := setupRotationTest(t)
 	defer ctrl.Finish()
 
-	mockKvStore.EXPECT().Delete("user1" + githubTokenKey).Return(nil)
-	mockKvStore.EXPECT().Delete("user1" + githubPrivateRepoKey).Return(nil)
-	mockKvStore.EXPECT().Delete("ghuser1" + githubUsernameKey).Return(nil)
+	mockKvStore.EXPECT().Delete("user1" + forgejoTokenKey).Return(nil)
+	mockKvStore.EXPECT().Delete("user1" + forgejoPrivateRepoKey).Return(nil)
+	mockKvStore.EXPECT().Delete("ghuser1" + forgejoUsernameKey).Return(nil)
 
 	api.On("GetUser", "user1").Return(&model.User{
 		Id:    "user1",
@@ -315,10 +315,10 @@ func TestForceDisconnectUser_NoGitHubUsername_FallbackFromProps(t *testing.T) {
 	p, api, mockKvStore, ctrl := setupRotationTest(t)
 	defer ctrl.Finish()
 
-	mockKvStore.EXPECT().Delete("user1" + githubTokenKey).Return(nil)
-	mockKvStore.EXPECT().Delete("user1" + githubPrivateRepoKey).Return(nil)
+	mockKvStore.EXPECT().Delete("user1" + forgejoTokenKey).Return(nil)
+	mockKvStore.EXPECT().Delete("user1" + forgejoPrivateRepoKey).Return(nil)
 	// Username recovered from user props, so the mapping delete should happen
-	mockKvStore.EXPECT().Delete("ghuser1" + githubUsernameKey).Return(nil)
+	mockKvStore.EXPECT().Delete("ghuser1" + forgejoUsernameKey).Return(nil)
 
 	api.On("GetUser", "user1").Return(&model.User{
 		Id:    "user1",
@@ -339,8 +339,8 @@ func TestForceDisconnectUser_NoGitHubUsername_NoPropsFallback(t *testing.T) {
 	p, api, mockKvStore, ctrl := setupRotationTest(t)
 	defer ctrl.Finish()
 
-	mockKvStore.EXPECT().Delete("user1" + githubTokenKey).Return(nil)
-	mockKvStore.EXPECT().Delete("user1" + githubPrivateRepoKey).Return(nil)
+	mockKvStore.EXPECT().Delete("user1" + forgejoTokenKey).Return(nil)
+	mockKvStore.EXPECT().Delete("user1" + forgejoPrivateRepoKey).Return(nil)
 	// No username available anywhere, so no mapping delete
 
 	api.On("GetUser", "user1").Return(&model.User{
@@ -361,9 +361,9 @@ func TestForceDisconnectUser_DeleteErrors(t *testing.T) {
 	p, api, mockKvStore, ctrl := setupRotationTest(t)
 	defer ctrl.Finish()
 
-	mockKvStore.EXPECT().Delete("user1" + githubTokenKey).Return(errors.New("delete failed"))
-	mockKvStore.EXPECT().Delete("user1" + githubPrivateRepoKey).Return(errors.New("delete failed"))
-	mockKvStore.EXPECT().Delete("ghuser1" + githubUsernameKey).Return(errors.New("delete failed"))
+	mockKvStore.EXPECT().Delete("user1" + forgejoTokenKey).Return(errors.New("delete failed"))
+	mockKvStore.EXPECT().Delete("user1" + forgejoPrivateRepoKey).Return(errors.New("delete failed"))
+	mockKvStore.EXPECT().Delete("ghuser1" + forgejoUsernameKey).Return(errors.New("delete failed"))
 
 	api.On("LogWarn", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Maybe()
 	api.On("GetUser", "user1").Return(nil, &model.AppError{Message: "user not found"})

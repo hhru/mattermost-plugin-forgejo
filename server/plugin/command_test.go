@@ -18,8 +18,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/oauth2"
 
 	"github.com/mattermost/mattermost-plugin-github/server/mocks"
+)
+
+const (
+	testToken = "ycbODW-BWbNBGfF7ac4T5RL5ruNm5BChCXgbkY1bWHqMt80JTkLsicQwo8de3tqfqlfMaglpgjqGOmSHeGp0dA==" //nolint:gosec // test fixture token, not a real credential
 )
 
 // Function to get the plugin object for test cases.
@@ -27,10 +32,10 @@ func getPluginTest(api *plugintest.API, mockKvStore *mocks.MockKvStore) *Plugin 
 	p := NewPlugin()
 	p.setConfiguration(
 		&Configuration{
-			GitHubOrg:               "mockOrg",
-			GitHubOAuthClientID:     "mockID",
-			GitHubOAuthClientSecret: "mockSecret",
-			EncryptionKey:           "mockKey123456789",
+			ForgejoOrg:               "mockOrg",
+			ForgejoOAuthClientID:     "mockID",
+			ForgejoOAuthClientSecret: "mockSecret",
+			EncryptionKey:            "mockKey123456789",
 		})
 	p.initializeAPI()
 	p.store = mockKvStore
@@ -132,90 +137,90 @@ func TestParseCommand(t *testing.T) {
 	}{
 		{
 			name:  "no parameters",
-			input: "/github subscribe",
+			input: "/forgejo subscribe",
 			want: output{
-				"/github",
+				"/forgejo",
 				"subscribe",
 				[]string(nil),
 			},
 		},
 		{
 			name:  "no action and no parameters",
-			input: "/github",
+			input: "/forgejo",
 			want: output{
-				"/github",
+				"/forgejo",
 				"",
 				[]string(nil),
 			},
 		},
 		{
 			name:  "simple one-word label",
-			input: `/github subscribe DHaussermann/hello-world issues,label:"Help"`,
+			input: `/forgejo subscribe DHaussermann/hello-world issues,label:"Help"`,
 			want: output{
-				"/github",
+				"/forgejo",
 				"subscribe",
 				[]string{"DHaussermann/hello-world", `issues,label:"Help"`},
 			},
 		},
 		{
 			name:  "two-word label",
-			input: `/github subscribe DHaussermann/hello-world issues,label:"Help Wanted"`,
+			input: `/forgejo subscribe DHaussermann/hello-world issues,label:"Help Wanted"`,
 			want: output{
-				"/github",
+				"/forgejo",
 				"subscribe",
 				[]string{"DHaussermann/hello-world", `issues,label:"Help Wanted"`},
 			},
 		},
 		{
 			name:  "multi-word label",
-			input: `/github subscribe DHaussermann/hello-world issues,label:"Good First Issue"`,
+			input: `/forgejo subscribe DHaussermann/hello-world issues,label:"Good First Issue"`,
 			want: output{
-				"/github",
+				"/forgejo",
 				"subscribe",
 				[]string{"DHaussermann/hello-world", `issues,label:"Good First Issue"`},
 			},
 		},
 		{
 			name:  "multiple spaces inside double-quotes",
-			input: `/github subscribe DHaussermann/hello-world issues,label:"Help    Wanted"`,
+			input: `/forgejo subscribe DHaussermann/hello-world issues,label:"Help    Wanted"`,
 			want: output{
-				"/github",
+				"/forgejo",
 				"subscribe",
 				[]string{"DHaussermann/hello-world", `issues,label:"Help    Wanted"`},
 			},
 		},
 		{
 			name:  "multiple spaces outside of double-quotes",
-			input: `  /github    subscribe     DHaussermann/hello-world issues,label:"Help Wanted"`,
+			input: `  /forgejo    subscribe     DHaussermann/hello-world issues,label:"Help Wanted"`,
 			want: output{
-				"/github",
+				"/forgejo",
 				"subscribe",
 				[]string{"DHaussermann/hello-world", `issues,label:"Help Wanted"`},
 			},
 		},
 		{
 			name:  "trailing whitespaces",
-			input: `/github subscribe DHaussermann/hello-world issues,label:"Help Wanted" `,
+			input: `/forgejo subscribe DHaussermann/hello-world issues,label:"Help Wanted" `,
 			want: output{
-				"/github",
+				"/forgejo",
 				"subscribe",
 				[]string{"DHaussermann/hello-world", `issues,label:"Help Wanted"`},
 			},
 		},
 		{
 			name:  "non-ASCII characters",
-			input: `/github subscribe طماطم issues,label:"日本語"`,
+			input: `/forgejo subscribe طماطم issues,label:"日本語"`,
 			want: output{
-				"/github",
+				"/forgejo",
 				"subscribe",
 				[]string{"طماطم", `issues,label:"日本語"`},
 			},
 		},
 		{
 			name:  "line breaks",
-			input: "/github \nsubscribe\nDHaussermann/hello-world\nissues,label:\"Good First Issue\"",
+			input: "/forgejo \nsubscribe\nDHaussermann/hello-world\nissues,label:\"Good First Issue\"",
 			want: output{
-				"/github",
+				"/forgejo",
 				"subscribe",
 				[]string{"DHaussermann/hello-world", `issues,label:"Good First Issue"`},
 			},
@@ -281,15 +286,29 @@ func TestExecuteCommand(t *testing.T) {
 		SetupMockStore func(*mocks.MockKvStore)
 	}{
 		"about command": {
-			commandArgs:    &model.CommandArgs{Command: "/github about"},
-			expectedMsg:    "GitHub version",
+			commandArgs:    &model.CommandArgs{Command: "/forgejo about"},
+			expectedMsg:    "Forgejo version",
 			SetupMockStore: func(mks *mocks.MockKvStore) {},
 		},
 
 		"help command": {
-			commandArgs:    &model.CommandArgs{Command: "/github help", ChannelId: "test-channelID", RootId: "test-rootID", UserId: "test-userID"},
-			expectedMsg:    "###### Mattermost GitHub Plugin - Slash Command Help\n",
-			SetupMockStore: func(mks *mocks.MockKvStore) {},
+			commandArgs: &model.CommandArgs{Command: "/forgejo help", ChannelId: "test-channelID", RootId: "test-rootID", UserId: "test-userID"},
+			expectedMsg: "###### Mattermost Forgejo Plugin - Slash Command Help\n",
+			SetupMockStore: func(mks *mocks.MockKvStore) {
+				mks.EXPECT().Get(gomock.Any(), gomock.Any()).DoAndReturn(func(key string, value any) error {
+					// Cast the value to the appropriate type and updated it
+					if userInfoPtr, ok := value.(**ForgejoUserInfo); ok {
+						*userInfoPtr = &ForgejoUserInfo{
+							// Mock user info data
+							Token: &oauth2.Token{
+								AccessToken:  "ycbODW-BWbNBGfF7ac4T5RL5ruNm5BChCXgbkY1bWHqMt80JTkLsicQwo8de3tqfqlfMaglpgjqGOmSHeGp0dA==",
+								RefreshToken: "ycbODW-BWbNBGfF7ac4T5RL5ruNm5BChCXgbkY1bWHqMt80JTkLsicQwo8de3tqfqlfMaglpgjqGOmSHeGp0dA==",
+							},
+						}
+					}
+					return nil // no error, so return nil
+				}).AnyTimes()
+			},
 		},
 	}
 	for name, tt := range tests {
@@ -1145,7 +1164,7 @@ func TestHandleUnsubscribe(t *testing.T) {
 				mockKVStore.EXPECT().SetAtomicWithRetries(SubscriptionsKey, gomock.Any()).Return(nil).Times(1)
 			},
 			assertions: func(result string) {
-				assert.Equal(t, "no subscription exists for `owner/repo` in the channel", result)
+				assert.Equal(t, "error while fetching user details: error getting user", result)
 			},
 		},
 		{
@@ -1178,12 +1197,12 @@ func TestHandleUnsubscribe(t *testing.T) {
 				}).Times(1)
 				mockAPI.On("GetUser", MockUserID).Return(&model.User{Username: MockUsername}, nil).Times(1)
 				mockAPI.On("CreatePost", mock.Anything).Return(nil, &model.AppError{Message: "error creating post"}).Times(1)
-				post.Message = "@mockUsername unsubscribed this channel from [owner](https://github.com/owner)"
+				post.Message = "@mockUsername unsubscribed this channel from [owner](https://forgejo.pyn.ru/owner)"
 				mockAPI.On("LogWarn", "Error while creating post", "channel_id", mock.Anything, "error", "error creating post").Times(1)
 				mockKVStore.EXPECT().SetAtomicWithRetries(SubscriptionsKey, gomock.Any()).Return(nil).Times(1)
 			},
 			assertions: func(result string) {
-				assert.Equal(t, "@mockUsername unsubscribed this channel from [owner](https://github.com/owner) error creating the public post: error creating post", result)
+				assert.Equal(t, "@mockUsername unsubscribed this channel from [owner](https://forgejo.pyn.ru/owner) error creating the public post: error creating post", result)
 			},
 		},
 		{
@@ -1216,12 +1235,12 @@ func TestHandleUnsubscribe(t *testing.T) {
 				}).Times(1)
 				mockAPI.On("GetUser", MockUserID).Return(&model.User{Username: MockUsername}, nil).Times(1)
 				mockAPI.On("CreatePost", mock.Anything).Return(nil, &model.AppError{Message: "error creating post"}).Times(1)
-				post.Message = "@mockUsername Unsubscribed this channel from [owner/repo](https://github.com/owner/repo)\n Please delete the [webhook](https://github.com/owner/repo/settings/hooks) for this subscription unless it's required for other subscriptions."
+				post.Message = "@mockUsername unsubscribed this channel from [owner/repo](https://forgejo.pyn.ru/owner/repo)"
 				mockAPI.On("LogWarn", "Error while creating post", "channel_id", mock.Anything, "error", "error creating post").Times(1)
 				mockKVStore.EXPECT().SetAtomicWithRetries(SubscriptionsKey, gomock.Any()).Return(nil).Times(1)
 			},
 			assertions: func(result string) {
-				assert.Equal(t, "@mockUsername Unsubscribed this channel from [owner/repo](https://github.com/owner/repo)\n Please delete the [webhook](https://github.com/owner/repo/settings/hooks) for this subscription unless it's required for other subscriptions. error creating the public post: error creating post", result)
+				assert.Equal(t, "@mockUsername unsubscribed this channel from [owner/repo](https://forgejo.pyn.ru/owner/repo) error creating the public post: error creating post", result)
 			},
 		},
 		{
@@ -1282,9 +1301,9 @@ func TestHandleSettings(t *testing.T) {
 			},
 			setup: func() {},
 			assertions: func(result string) {
-				assert.Equal(t, result, "Please specify both a setting and value. Use `/github help` for more usage information.")
+				assert.Equal(t, result, "Please specify both a setting and value. Use `/forgejo help` for more usage information.")
 			},
-			expectedResult: "Please specify both a setting and value. Use `/github help` for more usage information.",
+			expectedResult: "Please specify both a setting and value. Use `/forgejo help` for more usage information.",
 		},
 		{
 			name: "Invalid setting value for notifications",
@@ -1303,8 +1322,8 @@ func TestHandleSettings(t *testing.T) {
 				settingNotifications, settingOn,
 			},
 			setup: func() {
-				mockKvStore.EXPECT().Set(userInfo.GitHubUsername+githubUsernameKey, gomock.Any()).Return(true, nil).Times(1)
-				mockKvStore.EXPECT().Set(userInfo.UserID+githubTokenKey, gomock.Any()).Return(true, nil).Times(1)
+				mockKvStore.EXPECT().Set(userInfo.ForgejoUsername+forgejoUsernameKey, gomock.Any()).Return(true, nil).Times(1)
+				mockKvStore.EXPECT().Set(userInfo.UserID+forgejoTokenKey, gomock.Any()).Return(true, nil).Times(1)
 			},
 			assertions: func(result string) {
 				assert.Equal(t, result, "Settings updated.")
@@ -1317,9 +1336,9 @@ func TestHandleSettings(t *testing.T) {
 				settingNotifications, settingOn,
 			},
 			setup: func() {
-				mockKvStore.EXPECT().Set(userInfo.GitHubUsername+githubUsernameKey, gomock.Any()).Return(false, errors.New("error setting notification")).Times(1)
-				mockAPI.On("LogWarn", "Failed to store GitHub to userID mapping", "userID", "mockUserID", "GitHub username", "mockUsername", "error", "encountered error saving github username mapping: error setting notification").Times(1)
-				mockKvStore.EXPECT().Set(userInfo.UserID+githubTokenKey, gomock.Any()).Return(true, nil).Times(1)
+				mockKvStore.EXPECT().Set(userInfo.ForgejoUsername+forgejoUsernameKey, gomock.Any()).Return(false, errors.New("error setting notification")).Times(1)
+				mockAPI.On("LogWarn", "Failed to store Forgejo to userID mapping", "userID", "mockUserID", "Forgejo username", "mockUsername", "error", "encountered error saving forgejo username mapping: error setting notification").Times(1)
+				mockKvStore.EXPECT().Set(userInfo.UserID+forgejoTokenKey, gomock.Any()).Return(true, nil).Times(1)
 			},
 			assertions: func(result string) {
 				assert.Equal(t, result, "Settings updated.")
@@ -1332,9 +1351,9 @@ func TestHandleSettings(t *testing.T) {
 				settingNotifications, settingOff,
 			},
 			setup: func() {
-				mockKvStore.EXPECT().Set(userInfo.GitHubUsername+githubUsernameKey, gomock.Any()).Return(true, nil).Times(1)
-				mockKvStore.EXPECT().Set(userInfo.UserID+githubTokenKey, gomock.Any()).Return(true, nil).Times(1)
-				mockKvStore.EXPECT().Delete(userInfo.GitHubUsername + githubUsernameKey).Return(nil).Times(1)
+				mockKvStore.EXPECT().Set(userInfo.ForgejoUsername+forgejoUsernameKey, gomock.Any()).Return(true, nil).Times(1)
+				mockKvStore.EXPECT().Set(userInfo.UserID+forgejoTokenKey, gomock.Any()).Return(true, nil).Times(1)
+				mockKvStore.EXPECT().Delete(userInfo.ForgejoUsername + forgejoUsernameKey).Return(nil).Times(1)
 			},
 			assertions: func(result string) {
 				assert.Equal(t, result, "Settings updated.")
@@ -1347,10 +1366,10 @@ func TestHandleSettings(t *testing.T) {
 				settingNotifications, settingOff,
 			},
 			setup: func() {
-				mockKvStore.EXPECT().Set(userInfo.GitHubUsername+githubUsernameKey, gomock.Any()).Return(true, nil).Times(1)
-				mockKvStore.EXPECT().Set(userInfo.UserID+githubTokenKey, gomock.Any()).Return(true, nil).Times(1)
-				mockKvStore.EXPECT().Delete(userInfo.GitHubUsername + githubUsernameKey).Return(errors.New("error setting notification")).Times(1)
-				mockAPI.On("LogWarn", "Failed to delete GitHub to userID mapping", "userID", "mockUserID", "GitHub username", "mockUsername", "error", "error setting notification").Times(1)
+				mockKvStore.EXPECT().Set(userInfo.ForgejoUsername+forgejoUsernameKey, gomock.Any()).Return(true, nil).Times(1)
+				mockKvStore.EXPECT().Set(userInfo.UserID+forgejoTokenKey, gomock.Any()).Return(true, nil).Times(1)
+				mockKvStore.EXPECT().Delete(userInfo.ForgejoUsername + forgejoUsernameKey).Return(errors.New("error setting notification")).Times(1)
+				mockAPI.On("LogWarn", "Failed to delete Forgejo to userID mapping", "userID", "mockUserID", "Forgejo username", "mockUsername", "error", "error setting notification").Times(1)
 			},
 			assertions: func(result string) {
 				assert.Equal(t, result, "Settings updated.")
@@ -1363,7 +1382,7 @@ func TestHandleSettings(t *testing.T) {
 				settingReminders, settingOn,
 			},
 			setup: func() {
-				mockKvStore.EXPECT().Set(userInfo.UserID+githubTokenKey, gomock.Any()).Return(true, nil).Times(1)
+				mockKvStore.EXPECT().Set(userInfo.UserID+forgejoTokenKey, gomock.Any()).Return(true, nil).Times(1)
 			},
 			assertions: func(result string) {
 				assert.Equal(t, result, "Settings updated.")
@@ -1376,7 +1395,7 @@ func TestHandleSettings(t *testing.T) {
 				settingReminders, settingOff,
 			},
 			setup: func() {
-				mockKvStore.EXPECT().Set(userInfo.UserID+githubTokenKey, gomock.Any()).Return(true, nil).Times(1)
+				mockKvStore.EXPECT().Set(userInfo.UserID+forgejoTokenKey, gomock.Any()).Return(true, nil).Times(1)
 			},
 			assertions: func(result string) {
 				assert.Equal(t, result, "Settings updated.")
@@ -1389,7 +1408,7 @@ func TestHandleSettings(t *testing.T) {
 				settingReminders, settingOnChange,
 			},
 			setup: func() {
-				mockKvStore.EXPECT().Set(userInfo.UserID+githubTokenKey, gomock.Any()).Return(true, nil).Times(1)
+				mockKvStore.EXPECT().Set(userInfo.UserID+forgejoTokenKey, gomock.Any()).Return(true, nil).Times(1)
 			},
 			assertions: func(result string) {
 				assert.Equal(t, result, "Settings updated.")
@@ -1424,8 +1443,8 @@ func TestHandleSettings(t *testing.T) {
 				settingReminders, settingOnChange,
 			},
 			setup: func() {
-				mockKvStore.EXPECT().Set(userInfo.UserID+githubTokenKey, gomock.Any()).Return(false, errors.New("error storing user info")).Times(1)
-				mockAPI.On("LogWarn", "Failed to store github user info", "error", "error occurred while trying to store user info into KV store: error storing user info").Times(1)
+				mockKvStore.EXPECT().Set(userInfo.UserID+forgejoTokenKey, gomock.Any()).Return(false, errors.New("error storing user info")).Times(1)
+				mockAPI.On("LogWarn", "Failed to store forgejo user info", "error", "error occurred while trying to store user info into KV store: error storing user info").Times(1)
 			},
 			assertions: func(result string) {
 				assert.Equal(t, result, "Failed to store settings")
@@ -1749,8 +1768,8 @@ func TestHandleHelp(t *testing.T) {
 	p := getPluginTest(mockAPI, mockKVStore)
 
 	t.Run("Successfully get help text", func(t *testing.T) {
-		response := p.handleHelp(&plugin.Context{}, &model.CommandArgs{}, []string{}, &GitHubUserInfo{})
-		assert.Contains(t, response, "###### Mattermost GitHub Plugin - Slash Command Help\n")
+		response := p.handleHelp(&plugin.Context{}, &model.CommandArgs{}, []string{}, &ForgejoUserInfo{})
+		assert.Contains(t, response, "###### Mattermost Forgejo Plugin - Slash Command Help\n")
 	})
 }
 
@@ -1810,6 +1829,140 @@ func TestToSlice(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			result := tc.features.ToSlice()
 			assert.Equal(t, tc.expectedSlice, result)
+		})
+	}
+}
+
+func TestHandleTeamReviewNotifications(t *testing.T) {
+	tests := map[string]struct {
+		expectedMsg    string
+		userInfo       *ForgejoUserInfo
+		parameters     []string
+		SetupMockStore func(*mocks.MockKvStore)
+	}{
+		"team review notifications off": {
+			expectedMsg: "Settings updated.",
+			parameters:  []string{"team-review-notifications", "off"},
+			userInfo: &ForgejoUserInfo{
+				UserID: "test-userID",
+				Token: &oauth2.Token{
+					AccessToken:  testToken,
+					RefreshToken: testToken,
+				},
+				Settings: &UserSettings{
+					DisableTeamNotifications:       false,
+					ExcludeTeamReviewNotifications: []string{"repo1", "repo2"},
+				},
+			},
+			SetupMockStore: func(mks *mocks.MockKvStore) {
+				mks.EXPECT().Set("test-userID"+forgejoTokenKey, gomock.Any(), gomock.Any()).DoAndReturn(func(key string, value any, options ...pluginapi.KVSetOption) (bool, error) {
+					userInfo, ok := value.(*ForgejoUserInfo)
+					require.True(t, ok, "value should be *ForgejoUserInfo")
+					assert.Equal(t, "test-userID", userInfo.UserID)
+					assert.True(t, userInfo.Settings.DisableTeamNotifications)
+					assert.Empty(t, userInfo.Settings.ExcludeTeamReviewNotifications)
+					return true, nil
+				})
+			},
+		},
+		"team review notifications on": {
+			expectedMsg: "Settings updated.",
+			parameters:  []string{"team-review-notifications", "on"},
+			userInfo: &ForgejoUserInfo{
+				UserID: "test-userID",
+				Token: &oauth2.Token{
+					AccessToken:  testToken,
+					RefreshToken: testToken,
+				},
+				Settings: &UserSettings{
+					DisableTeamNotifications:       true,
+					ExcludeTeamReviewNotifications: []string{"repo1", "repo2"},
+				},
+			},
+			SetupMockStore: func(mks *mocks.MockKvStore) {
+				mks.EXPECT().Set("test-userID"+forgejoTokenKey, gomock.Any(), gomock.Any()).DoAndReturn(func(key string, value any, options ...pluginapi.KVSetOption) (bool, error) {
+					userInfo, ok := value.(*ForgejoUserInfo)
+					require.True(t, ok, "value should be *ForgejoUserInfo")
+					assert.Equal(t, "test-userID", userInfo.UserID)
+					assert.False(t, userInfo.Settings.DisableTeamNotifications)
+					assert.Empty(t, userInfo.Settings.ExcludeTeamReviewNotifications)
+					return true, nil
+				})
+			},
+		},
+		"team review notifications exclude with incorrect values": {
+			expectedMsg: "Invalid format. Repository names must be comma-separated in a single argument",
+			parameters:  []string{"team-review-notifications", "on", "--exclude", "repo1", "repo2"},
+			userInfo: &ForgejoUserInfo{
+				UserID: "test-userID",
+				Token: &oauth2.Token{
+					AccessToken:  testToken,
+					RefreshToken: testToken,
+				},
+				Settings: &UserSettings{
+					DisableTeamNotifications:       true,
+					ExcludeTeamReviewNotifications: []string{},
+				},
+			},
+			SetupMockStore: func(mks *mocks.MockKvStore) {},
+		},
+		"team review notifications with incorrect setting": {
+			expectedMsg: "Invalid setting. Use `on` or `off`.",
+			parameters:  []string{"team-review-notifications", "invalid"},
+			userInfo: &ForgejoUserInfo{
+				UserID: "test-userID",
+				Token: &oauth2.Token{
+					AccessToken:  testToken,
+					RefreshToken: testToken,
+				},
+				Settings: &UserSettings{
+					DisableTeamNotifications:       false,
+					ExcludeTeamReviewNotifications: []string{},
+				},
+			},
+			SetupMockStore: func(mks *mocks.MockKvStore) {},
+		},
+		"team review notifications with correct exclude flag": {
+			expectedMsg: "Settings updated.",
+			parameters:  []string{"team-review-notifications", "on", "--exclude", "repo1,repo2,repo3"},
+			userInfo: &ForgejoUserInfo{
+				UserID: "test-userID",
+				Token: &oauth2.Token{
+					AccessToken:  testToken,
+					RefreshToken: testToken,
+				},
+				Settings: &UserSettings{
+					DisableTeamNotifications:       true,
+					ExcludeTeamReviewNotifications: []string{},
+				},
+			},
+			SetupMockStore: func(mks *mocks.MockKvStore) {
+				mks.EXPECT().Set("test-userID"+forgejoTokenKey, gomock.Any(), gomock.Any()).DoAndReturn(func(key string, value any, options ...pluginapi.KVSetOption) (bool, error) {
+					userInfo, ok := value.(*ForgejoUserInfo)
+					require.True(t, ok, "value should be *ForgejoUserInfo")
+					assert.Equal(t, "test-userID", userInfo.UserID)
+					assert.False(t, userInfo.Settings.DisableTeamNotifications)
+					assert.Equal(t, []string{"repo1", "repo2", "repo3"}, userInfo.Settings.ExcludeTeamReviewNotifications)
+					return true, nil
+				})
+			},
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			mockCtrl := gomock.NewController(t)
+			defer mockCtrl.Finish()
+
+			mockKvStore := mocks.NewMockKvStore(mockCtrl)
+
+			tt.SetupMockStore(mockKvStore)
+
+			currentTestAPI := &plugintest.API{}
+			p := getPluginTest(currentTestAPI, mockKvStore)
+
+			msg := p.handleSettings(&plugin.Context{}, &model.CommandArgs{}, tt.parameters, tt.userInfo)
+			assert.Equal(t, tt.expectedMsg, msg)
 		})
 	}
 }

@@ -13,7 +13,6 @@ import (
 
 	"github.com/google/go-github/v54/github"
 	"github.com/pkg/errors"
-	"golang.org/x/oauth2"
 
 	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/mattermost/mattermost/server/public/plugin"
@@ -35,8 +34,6 @@ const (
 	featureReleases           = "releases"
 	featureWorkflowFailure    = "workflow_failure"
 	featureWorkflowSuccess    = "workflow_success"
-	featureWorkflowRunFailure = "workflow_run_failure"
-	featureWorkflowRunSuccess = "workflow_run_success"
 	featureDiscussions        = "discussions"
 	featureDiscussionComments = "discussion_comments"
 )
@@ -44,10 +41,6 @@ const (
 const (
 	PerPageValue = 50
 )
-
-var ErrNotFound = errors.New("github user not found")
-
-const DefaultRepoKey string = "%s_%s-default-repo"
 
 var validFeatures = map[string]bool{
 	featureIssueCreation:      true,
@@ -64,8 +57,6 @@ var validFeatures = map[string]bool{
 	featureReleases:           true,
 	featureWorkflowFailure:    true,
 	featureWorkflowSuccess:    true,
-	featureWorkflowRunFailure: true,
-	featureWorkflowRunSuccess: true,
 	featureDiscussions:        true,
 	featureDiscussionComments: true,
 }
@@ -135,9 +126,9 @@ func (p *Plugin) getCommand(config *Configuration) (*model.Command, error) {
 	}
 
 	return &model.Command{
-		Trigger:              "github",
+		Trigger:              "forgejo",
 		AutoComplete:         true,
-		AutoCompleteDesc:     "Available commands: connect, disconnect, todo, subscriptions, issue, default-repo, me, mute, settings, help, about",
+		AutoCompleteDesc:     "Available commands: connect, disconnect, todo, subscriptions, issue, me, mute, settings, help, about",
 		AutoCompleteHint:     "[command]",
 		AutocompleteData:     getAutocompleteData(config),
 		AutocompleteIconData: iconData,
@@ -154,7 +145,7 @@ func (p *Plugin) postCommandResponse(args *model.CommandArgs, text string) {
 	p.client.Post.SendEphemeralPost(args.UserId, post)
 }
 
-func (p *Plugin) getMutedUsernames(userInfo *GitHubUserInfo) ([]string, error) {
+func (p *Plugin) getMutedUsernames(userInfo *ForgejoUserInfo) ([]string, error) {
 	var mutedUsernameBytes []byte
 	err := p.store.Get(userInfo.UserID+"-muted-users", &mutedUsernameBytes)
 	if err != nil {
@@ -169,7 +160,7 @@ func (p *Plugin) getMutedUsernames(userInfo *GitHubUserInfo) ([]string, error) {
 	return mutedUsers, nil
 }
 
-func (p *Plugin) handleMuteList(_ *model.CommandArgs, userInfo *GitHubUserInfo) string {
+func (p *Plugin) handleMuteList(_ *model.CommandArgs, userInfo *ForgejoUserInfo) string {
 	mutedUsernames, err := p.getMutedUsernames(userInfo)
 	if err != nil {
 		p.client.Log.Error("error occurred getting muted users.", "UserID", userInfo.UserID, "Error", err)
@@ -186,37 +177,7 @@ func (p *Plugin) handleMuteList(_ *model.CommandArgs, userInfo *GitHubUserInfo) 
 	return "Your muted users:\n" + mutedUsers
 }
 
-func (p *Plugin) isValidGitHubUsername(username string, userInfo *GitHubUserInfo) (bool, error) {
-	githubClient := p.githubConnectUser(context.Background(), userInfo)
-
-	if cErr := p.useGitHubClient(userInfo, func(userInfo *GitHubUserInfo, token *oauth2.Token) error {
-		ghUser, _, err := githubClient.Users.Get(context.Background(), username)
-		if err != nil {
-			if gErr, ok := err.(*github.ErrorResponse); ok && gErr.Response.StatusCode == http.StatusNotFound {
-				return ErrNotFound
-			}
-
-			return err
-		}
-
-		if ghUser == nil {
-			return ErrNotFound
-		}
-
-		return nil
-	}); cErr != nil {
-		if errors.Is(cErr, ErrNotFound) {
-			return false, nil
-		}
-
-		p.client.Log.Warn("Failed to fetch user", "error", cErr.Error())
-		return false, errors.New("Failed to fetch user")
-	}
-
-	return true, nil
-}
-
-func (p *Plugin) handleMuteAdd(_ *model.CommandArgs, username string, userInfo *GitHubUserInfo) string {
+func (p *Plugin) handleMuteAdd(_ *model.CommandArgs, username string, userInfo *ForgejoUserInfo) string {
 	mutedUsernames, err := p.getMutedUsernames(userInfo)
 	if err != nil {
 		p.client.Log.Error("error occurred getting muted users.", "UserID", userInfo.UserID, "Error", err)
@@ -227,18 +188,13 @@ func (p *Plugin) handleMuteAdd(_ *model.CommandArgs, username string, userInfo *
 		return username + " is already muted"
 	}
 
-	isValidUsername, err := p.isValidGitHubUsername(username, userInfo)
-	if err != nil {
-		return "Error occurred validating username"
-	}
-
-	if strings.Contains(username, ",") || !isValidUsername {
+	if strings.Contains(username, ",") {
 		return "Invalid username provided"
 	}
 
 	var mutedUsers string
 	if len(mutedUsernames) > 0 {
-		// , is a character not allowed in github usernames so we can split on them
+		// , is a character not allowed in forgejo usernames so we can split on them
 		mutedUsers = strings.Join(mutedUsernames, ",") + "," + username
 	} else {
 		mutedUsers = username
@@ -252,7 +208,7 @@ func (p *Plugin) handleMuteAdd(_ *model.CommandArgs, username string, userInfo *
 	return fmt.Sprintf("`%v`", username) + " is now muted. You'll no longer receive notifications for comments in your PRs and issues."
 }
 
-func (p *Plugin) handleUnmute(_ *model.CommandArgs, username string, userInfo *GitHubUserInfo) string {
+func (p *Plugin) handleUnmute(_ *model.CommandArgs, username string, userInfo *ForgejoUserInfo) string {
 	mutedUsernames, err := p.getMutedUsernames(userInfo)
 	if err != nil {
 		p.client.Log.Error("error occurred getting muted users.", "UserID", userInfo.UserID, "Error", err)
@@ -273,7 +229,7 @@ func (p *Plugin) handleUnmute(_ *model.CommandArgs, username string, userInfo *G
 	return fmt.Sprintf("`%v`", username) + " is no longer muted"
 }
 
-func (p *Plugin) handleUnmuteAll(_ *model.CommandArgs, userInfo *GitHubUserInfo) string {
+func (p *Plugin) handleUnmuteAll(_ *model.CommandArgs, userInfo *ForgejoUserInfo) string {
 	mutedUsernames, err := p.getMutedUsernames(userInfo)
 	if err != nil {
 		p.client.Log.Error("error occurred getting muted users.", "UserID", userInfo.UserID, "Error", err)
@@ -292,7 +248,7 @@ func (p *Plugin) handleUnmuteAll(_ *model.CommandArgs, userInfo *GitHubUserInfo)
 	return "Unmuted all users"
 }
 
-func (p *Plugin) handleMuteCommand(_ *plugin.Context, args *model.CommandArgs, parameters []string, userInfo *GitHubUserInfo) string {
+func (p *Plugin) handleMuteCommand(_ *plugin.Context, args *model.CommandArgs, parameters []string, userInfo *ForgejoUserInfo) string {
 	if len(parameters) == 0 {
 		return "Invalid mute command. Available commands are 'list', 'add' and 'delete'."
 	}
@@ -338,7 +294,7 @@ func arrayDifference(a, b []string) ([]string, bool) {
 	return diff, removed
 }
 
-func (p *Plugin) handleSubscribe(c *plugin.Context, args *model.CommandArgs, parameters []string, userInfo *GitHubUserInfo) string {
+func (p *Plugin) handleSubscribe(c *plugin.Context, args *model.CommandArgs, parameters []string, userInfo *ForgejoUserInfo) string {
 	switch {
 	case len(parameters) == 0:
 		return "Please specify a repository or 'list' command."
@@ -349,7 +305,7 @@ func (p *Plugin) handleSubscribe(c *plugin.Context, args *model.CommandArgs, par
 	}
 }
 
-func (p *Plugin) handleSubscriptions(c *plugin.Context, args *model.CommandArgs, parameters []string, userInfo *GitHubUserInfo) string {
+func (p *Plugin) handleSubscriptions(c *plugin.Context, args *model.CommandArgs, parameters []string, userInfo *ForgejoUserInfo) string {
 	if len(parameters) == 0 {
 		return "Invalid subscribe command. Available commands are 'list', 'add' and 'delete'."
 	}
@@ -369,7 +325,7 @@ func (p *Plugin) handleSubscriptions(c *plugin.Context, args *model.CommandArgs,
 	}
 }
 
-func (p *Plugin) handleSubscriptionsList(_ *plugin.Context, args *model.CommandArgs, _ []string, _ *GitHubUserInfo) string {
+func (p *Plugin) handleSubscriptionsList(_ *plugin.Context, args *model.CommandArgs, _ []string, _ *ForgejoUserInfo) string {
 	txt := ""
 	subs, err := p.GetSubscriptionsByChannel(args.ChannelId)
 	if err != nil {
@@ -408,42 +364,35 @@ func (p *Plugin) createPost(channelID, userID, message string) error {
 	return nil
 }
 
-func (p *Plugin) checkIfConfiguredWebhookExists(ctx context.Context, githubClient *github.Client, userInfo *GitHubUserInfo, repo, owner string) (bool, error) {
+func (p *Plugin) checkIfConfiguredWebhookExists(ctx context.Context, githubClient *github.Client, repo, owner string) (bool, int, error) {
+	const undefinedResponseStatusCode = -1
 	found := false
 	opt := &github.ListOptions{
 		PerPage: PerPageValue,
 	}
 	siteURL, err := getSiteURL(p.client)
 	if err != nil {
-		return false, err
+		return false, undefinedResponseStatusCode, err
 	}
 
 	for {
 		var githubHooks []*github.Hook
 		var githubResponse *github.Response
-		var err, cErr error
+		var err error
 
 		if repo == "" {
-			cErr = p.useGitHubClient(userInfo, func(info *GitHubUserInfo, token *oauth2.Token) error {
-				githubHooks, githubResponse, err = githubClient.Organizations.ListHooks(ctx, owner, opt)
-				if err != nil {
-					return err
-				}
-				return nil
-			})
+			githubHooks, githubResponse, err = githubClient.Organizations.ListHooks(ctx, owner, opt)
 		} else {
-			cErr = p.useGitHubClient(userInfo, func(info *GitHubUserInfo, token *oauth2.Token) error {
-				githubHooks, githubResponse, err = githubClient.Repositories.ListHooks(ctx, owner, repo, opt)
-				if err != nil {
-					return err
-				}
-				return nil
-			})
+			githubHooks, githubResponse, err = githubClient.Repositories.ListHooks(ctx, owner, repo, opt)
 		}
 
-		if cErr != nil {
+		if err != nil {
 			p.client.Log.Warn("Not able to get the list of webhooks", "Owner", owner, "Repo", repo, "error", err.Error())
-			return found, err
+			var errResponse *github.ErrorResponse
+			if errors.As(err, &errResponse) && errResponse.Response != nil {
+				return found, errResponse.Response.StatusCode, err
+			}
+			return found, undefinedResponseStatusCode, err
 		}
 
 		for _, hook := range githubHooks {
@@ -459,11 +408,11 @@ func (p *Plugin) checkIfConfiguredWebhookExists(ctx context.Context, githubClien
 		opt.Page = githubResponse.NextPage
 	}
 
-	return found, nil
+	return found, http.StatusOK, nil
 }
 
-func (p *Plugin) handleSubscribesAdd(_ *plugin.Context, args *model.CommandArgs, parameters []string, userInfo *GitHubUserInfo) string {
-	const errorNoWebhookFound = "\n**Note:** No webhook was found for this repository or organization. To create one, enter the following slash command `/github setup webhook`"
+func (p *Plugin) handleSubscribesAdd(_ *plugin.Context, args *model.CommandArgs, parameters []string, userInfo *ForgejoUserInfo) string {
+	const errorNoWebhookFound = "\n**Note:** No webhook was found for this repository or organization. To create one, enter the following slash command `/forgejo setup webhook`"
 	subscriptionEvents := Features("pulls,issues,creates,deletes")
 	if len(parameters) == 0 {
 		return "Please specify a repository."
@@ -552,9 +501,9 @@ func (p *Plugin) handleSubscribesAdd(_ *plugin.Context, args *model.CommandArgs,
 
 		subOrgMsg := fmt.Sprintf("Successfully subscribed to organization %s.", owner)
 
-		found, foundErr := p.checkIfConfiguredWebhookExists(ctx, githubClient, userInfo, repo, owner)
+		found, responseCode, foundErr := p.checkIfConfiguredWebhookExists(ctx, githubClient, repo, owner)
 		if foundErr != nil {
-			if strings.Contains(foundErr.Error(), "404 Not Found") {
+			if responseCode == http.StatusNotFound || responseCode == http.StatusForbidden {
 				// We are not returning an error here and just a subscription success message, as the above error condition occurs when the user is not authorized to access webhooks.
 				return ""
 			}
@@ -581,26 +530,20 @@ func (p *Plugin) handleSubscribesAdd(_ *plugin.Context, args *model.CommandArgs,
 		msg += previousSubscribedEventMessage
 	}
 
-	if cErr := p.useGitHubClient(userInfo, func(userInfo *GitHubUserInfo, token *oauth2.Token) error {
-		var ghRepo *github.Repository
-		ghRepo, _, err = githubClient.Repositories.Get(ctx, owner, repo)
-		if err != nil {
-			return err
-		} else if ghRepo != nil && ghRepo.GetPrivate() {
-			msg += "\n\n**Warning:** You subscribed to a private repository. Anyone with access to this channel will be able to read the events getting posted here."
-		}
-		return nil
-	}); cErr != nil {
-		p.client.Log.Warn("Failed to fetch repository", "error", cErr.Error())
+	ghRepo, _, err := githubClient.Repositories.Get(ctx, owner, repo)
+	if err != nil {
+		p.client.Log.Warn("Failed to fetch repository", "error", err.Error())
+	} else if ghRepo != nil && ghRepo.GetPrivate() {
+		msg += "\n\n**Warning:** You subscribed to a private repository. Anyone with access to this channel will be able to read the events getting posted here."
 	}
 
 	if err = p.createPost(args.ChannelId, p.BotUserID, msg); err != nil {
 		return fmt.Sprintf("%s\nError creating the public post: %s", msg, err.Error())
 	}
 
-	found, err := p.checkIfConfiguredWebhookExists(ctx, githubClient, userInfo, repo, owner)
+	found, responseCode, err := p.checkIfConfiguredWebhookExists(ctx, githubClient, repo, owner)
 	if err != nil {
-		if strings.Contains(err.Error(), "404 Not Found") {
+		if responseCode == http.StatusNotFound || responseCode == http.StatusForbidden {
 			// We are not returning an error here and just a subscription success message, as the above error condition occurs when the user is not authorized to access webhooks.
 			return ""
 		}
@@ -636,7 +579,7 @@ func (p *Plugin) getSubscribedFeatures(channelID, owner, repo string) (Features,
 	return previousFeatures, nil
 }
 
-func (p *Plugin) handleUnsubscribe(_ *plugin.Context, args *model.CommandArgs, parameters []string, _ *GitHubUserInfo) string {
+func (p *Plugin) handleUnsubscribe(_ *plugin.Context, args *model.CommandArgs, parameters []string, _ *ForgejoUserInfo) string {
 	if len(parameters) == 0 {
 		return "Please specify a repository."
 	}
@@ -650,12 +593,8 @@ func (p *Plugin) handleUnsubscribe(_ *plugin.Context, args *model.CommandArgs, p
 
 	owner = strings.ToLower(owner)
 	repo = strings.ToLower(repo)
-	if sErr := p.Unsubscribe(args.ChannelId, repo, owner); sErr != nil {
-		if sErr.Code == SubscriptionNotFound {
-			return sErr.Error.Error()
-		}
-
-		p.client.Log.Warn("Failed to unsubscribe", "repo", repo, "error", sErr.Error.Error())
+	if err := p.Unsubscribe(args.ChannelId, repo, owner); err != nil {
+		p.client.Log.Warn("Failed to unsubscribe", "repo", repo, "error", err.Error())
 		return "Encountered an error trying to unsubscribe. Please try again."
 	}
 
@@ -679,8 +618,7 @@ func (p *Plugin) handleUnsubscribe(_ *plugin.Context, args *model.CommandArgs, p
 	}
 
 	repoLink := baseURL + owner + "/" + repo
-	unsubscribeMessage = fmt.Sprintf("@%v Unsubscribed this channel from [%s/%s](%s)", user.Username, owner, repo, repoLink)
-	unsubscribeMessage += fmt.Sprintf("\n Please delete the [webhook](%s) for this subscription unless it's required for other subscriptions.", fmt.Sprintf("%s/settings/hooks", repoLink))
+	unsubscribeMessage = fmt.Sprintf("@%v unsubscribed this channel from [%s/%s](%s)", user.Username, owner, repo, repoLink)
 
 	if err := p.createPost(args.ChannelId, p.BotUserID, unsubscribeMessage); err != nil {
 		return fmt.Sprintf("%s error creating the public post: %s", unsubscribeMessage, err.Error())
@@ -689,15 +627,13 @@ func (p *Plugin) handleUnsubscribe(_ *plugin.Context, args *model.CommandArgs, p
 	return ""
 }
 
-func (p *Plugin) handleDisconnect(_ *plugin.Context, args *model.CommandArgs, _ []string, _ *GitHubUserInfo) string {
+func (p *Plugin) handleDisconnect(_ *plugin.Context, args *model.CommandArgs, _ []string, _ *ForgejoUserInfo) string {
 	p.disconnectGitHubAccount(args.UserId)
-	return "Disconnected your GitHub account."
+	return "Disconnected your Forgejo account."
 }
 
-func (p *Plugin) handleTodo(_ *plugin.Context, _ *model.CommandArgs, _ []string, userInfo *GitHubUserInfo) string {
-	githubClient := p.githubConnectUser(context.Background(), userInfo)
-
-	text, err := p.GetToDo(context.Background(), userInfo, githubClient)
+func (p *Plugin) handleTodo(_ *plugin.Context, _ *model.CommandArgs, _ []string, userInfo *ForgejoUserInfo) string {
+	text, err := p.GetToDo(userInfo)
 	if err != nil {
 		p.client.Log.Warn("Failed get get Todos", "error", err.Error())
 		return "Encountered an error getting your to do items."
@@ -706,38 +642,30 @@ func (p *Plugin) handleTodo(_ *plugin.Context, _ *model.CommandArgs, _ []string,
 	return text
 }
 
-func (p *Plugin) handleMe(_ *plugin.Context, _ *model.CommandArgs, _ []string, userInfo *GitHubUserInfo) string {
+func (p *Plugin) handleMe(_ *plugin.Context, _ *model.CommandArgs, _ []string, userInfo *ForgejoUserInfo) string {
 	githubClient := p.githubConnectUser(context.Background(), userInfo)
-	var gitUser *github.User
-	cErr := p.useGitHubClient(userInfo, func(userInfo *GitHubUserInfo, token *oauth2.Token) error {
-		resp, _, err := githubClient.Users.Get(context.Background(), "")
-		if err != nil {
-			return err
-		}
-		gitUser = resp
-		return nil
-	})
-	if cErr != nil {
-		return "Encountered an error getting your GitHub profile."
+	gitUser, _, err := githubClient.Users.Get(context.Background(), "")
+	if err != nil {
+		return "Encountered an error getting your Forgejo profile."
 	}
 
-	text := fmt.Sprintf("You are connected to GitHub as:\n# [![image](%s =40x40)](%s) [%s](%s)", gitUser.GetAvatarURL(), gitUser.GetHTMLURL(), gitUser.GetLogin(), gitUser.GetHTMLURL())
+	text := fmt.Sprintf("You are connected to Forgejo as:\n# [![image](%s =40x40)](%s) [%s](%s)", gitUser.GetAvatarURL(), gitUser.GetHTMLURL(), gitUser.GetLogin(), gitUser.GetHTMLURL())
 	return text
 }
 
-func (p *Plugin) handleHelp(_ *plugin.Context, _ *model.CommandArgs, _ []string, _ *GitHubUserInfo) string {
+func (p *Plugin) handleHelp(_ *plugin.Context, _ *model.CommandArgs, _ []string, _ *ForgejoUserInfo) string {
 	message, err := renderTemplate("helpText", p.getConfiguration())
 	if err != nil {
 		p.client.Log.Warn("Failed to render help template", "error", err.Error())
 		return "Encountered an error posting help text."
 	}
 
-	return "###### Mattermost GitHub Plugin - Slash Command Help\n" + message
+	return "###### Mattermost Forgejo Plugin - Slash Command Help\n" + message
 }
 
-func (p *Plugin) handleSettings(_ *plugin.Context, _ *model.CommandArgs, parameters []string, userInfo *GitHubUserInfo) string {
+func (p *Plugin) handleSettings(_ *plugin.Context, _ *model.CommandArgs, parameters []string, userInfo *ForgejoUserInfo) string {
 	if len(parameters) < 2 {
-		return "Please specify both a setting and value. Use `/github help` for more usage information."
+		return "Please specify both a setting and value. Use `/forgejo help` for more usage information."
 	}
 
 	setting := parameters[0]
@@ -767,40 +695,59 @@ func (p *Plugin) handleSettings(_ *plugin.Context, _ *model.CommandArgs, paramet
 		default:
 			return "Invalid value. Accepted values are: \"on\" or \"off\" or \"on-change\" ."
 		}
+	case settingTeamNotifications:
+		switch settingValue {
+		case settingOn:
+			userInfo.Settings.DisableTeamNotifications = false
+			if len(parameters) > 2 {
+				repos, errMsg := processTeamNotificationsExcludeFlag(parameters[2:])
+				if errMsg != "" {
+					return errMsg
+				}
+				userInfo.Settings.ExcludeTeamReviewNotifications = repos
+			} else {
+				userInfo.Settings.ExcludeTeamReviewNotifications = []string{}
+			}
+		case settingOff:
+			userInfo.Settings.ExcludeTeamReviewNotifications = []string{}
+			userInfo.Settings.DisableTeamNotifications = true
+		default:
+			return "Invalid setting. Use `on` or `off`."
+		}
 	default:
 		return "Unknown setting " + setting
 	}
 
 	if setting == settingNotifications {
 		if userInfo.Settings.Notifications {
-			err := p.storeGitHubToUserIDMapping(userInfo.GitHubUsername, userInfo.UserID)
+			err := p.storeGitHubToUserIDMapping(userInfo.ForgejoUsername, userInfo.UserID)
 			if err != nil {
-				p.client.Log.Warn("Failed to store GitHub to userID mapping",
+				p.client.Log.Warn("Failed to store Forgejo to userID mapping",
 					"userID", userInfo.UserID,
-					"GitHub username", userInfo.GitHubUsername,
+					"Forgejo username", userInfo.ForgejoUsername,
 					"error", err.Error())
 			}
 		} else {
-			err := p.store.Delete(userInfo.GitHubUsername + githubUsernameKey)
+			err := p.store.Delete(userInfo.ForgejoUsername + forgejoUsernameKey)
 			if err != nil {
-				p.client.Log.Warn("Failed to delete GitHub to userID mapping",
+				p.client.Log.Warn("Failed to delete Forgejo to userID mapping",
 					"userID", userInfo.UserID,
-					"GitHub username", userInfo.GitHubUsername,
+					"Forgejo username", userInfo.ForgejoUsername,
 					"error", err.Error())
 			}
 		}
 	}
 
-	err := p.storeGitHubUserInfo(userInfo, p.getConfiguration().EncryptionKey)
+	err := p.storeGitHubUserInfo(userInfo)
 	if err != nil {
-		p.client.Log.Warn("Failed to store github user info", "error", err.Error())
+		p.client.Log.Warn("Failed to store forgejo user info", "error", err.Error())
 		return "Failed to store settings"
 	}
 
 	return "Settings updated."
 }
 
-func (p *Plugin) handleIssue(_ *plugin.Context, args *model.CommandArgs, parameters []string, userInfo *GitHubUserInfo) string {
+func (p *Plugin) handleIssue(_ *plugin.Context, args *model.CommandArgs, parameters []string, userInfo *ForgejoUserInfo) string {
 	if len(parameters) == 0 {
 		return "Invalid issue command. Available command is 'create'."
 	}
@@ -815,124 +762,6 @@ func (p *Plugin) handleIssue(_ *plugin.Context, args *model.CommandArgs, paramet
 	default:
 		return fmt.Sprintf("Unknown subcommand %v", command)
 	}
-}
-
-func (p *Plugin) handleDefaultRepo(c *plugin.Context, args *model.CommandArgs, parameters []string, userInfo *GitHubUserInfo) string {
-	if len(parameters) == 0 {
-		return "Invalid action. Available actions are 'set', 'get' and 'unset'."
-	}
-
-	command := parameters[0]
-	parameters = parameters[1:]
-
-	switch command {
-	case "set":
-		return p.handleSetDefaultRepo(args, parameters, userInfo)
-	case "get":
-		return p.handleGetDefaultRepo(args, userInfo)
-	case "unset":
-		return p.handleUnSetDefaultRepo(args, userInfo)
-	default:
-		return fmt.Sprintf("Unknown subcommand %v", command)
-	}
-}
-
-func (p *Plugin) handleSetDefaultRepo(args *model.CommandArgs, parameters []string, userInfo *GitHubUserInfo) string {
-	if len(parameters) == 0 {
-		return "Please specify a repository."
-	}
-
-	repo := parameters[0]
-	config := p.getConfiguration()
-	baseURL := config.getBaseURL()
-	owner, repo := parseOwnerAndRepo(repo, baseURL)
-	if owner == "" || repo == "" {
-		return "Please provide a valid repository"
-	}
-
-	owner = strings.ToLower(owner)
-	repo = strings.ToLower(repo)
-
-	if config.GitHubOrg != "" && !p.isOrgInLockedOrgs(config.GitHubOrg, owner) {
-		return fmt.Sprintf("Repository is not part of the locked Github organization. Locked Github organizations: %s", config.GitHubOrg)
-	}
-
-	ctx := context.Background()
-	githubClient := p.githubConnectUser(ctx, userInfo)
-
-	ghRepo, _, err := githubClient.Repositories.Get(ctx, owner, repo)
-	if err != nil {
-		return "Error occurred while getting github repository details"
-	}
-	if ghRepo == nil {
-		return fmt.Sprintf("Unknown repository %s", fullNameFromOwnerAndRepo(owner, repo))
-	}
-
-	if _, err := p.store.Set(fmt.Sprintf(DefaultRepoKey, args.ChannelId, userInfo.UserID), fmt.Appendf(nil, "%s/%s", owner, repo)); err != nil {
-		return "Error occurred saving the default repo"
-	}
-
-	repoLink := fmt.Sprintf("%s%s/%s", baseURL, owner, repo)
-	successMsg := fmt.Sprintf("The default repo has been set to [%s/%s](%s) for this channel", owner, repo, repoLink)
-
-	return successMsg
-}
-
-func (p *Plugin) GetDefaultRepo(userID, channelID string) (string, error) {
-	var defaultRepoBytes []byte
-	if err := p.store.Get(fmt.Sprintf(DefaultRepoKey, channelID, userID), &defaultRepoBytes); err != nil {
-		return "", err
-	}
-
-	return string(defaultRepoBytes), nil
-}
-
-func (p *Plugin) handleGetDefaultRepo(args *model.CommandArgs, userInfo *GitHubUserInfo) string {
-	defaultRepo, err := p.GetDefaultRepo(userInfo.UserID, args.ChannelId)
-	if err != nil {
-		p.client.Log.Warn("Not able to get the default repo", "UserID", userInfo.UserID, "ChannelID", args.ChannelId, "Error", err.Error())
-		return "Error occurred while getting the default repo"
-	}
-
-	if defaultRepo == "" {
-		return "You have not set a default repository for this channel"
-	}
-
-	config := p.getConfiguration()
-	repoLink := config.getBaseURL() + defaultRepo
-	return fmt.Sprintf("The default repository is [%s](%s)", defaultRepo, repoLink)
-}
-
-func (p *Plugin) handleUnSetDefaultRepo(args *model.CommandArgs, userInfo *GitHubUserInfo) string {
-	defaultRepo, err := p.GetDefaultRepo(userInfo.UserID, args.ChannelId)
-	if err != nil {
-		p.client.Log.Warn("Not able to get the default repo", "UserID", userInfo.UserID, "ChannelID", args.ChannelId, "Error", err.Error())
-		return "Error occurred while getting the default repo"
-	}
-
-	if defaultRepo == "" {
-		return "You have not set a default repository for this channel"
-	}
-
-	if err := p.store.Delete(fmt.Sprintf(DefaultRepoKey, args.ChannelId, userInfo.UserID)); err != nil {
-		return "Error occurred while unsetting the repo for this channel"
-	}
-
-	return "The default repository has been unset successfully"
-}
-
-func (p *Plugin) isOrgInLockedOrgs(configuredOrgs, owner string) bool {
-	if configuredOrgs == "" {
-		return true
-	}
-
-	for org := range strings.SplitSeq(configuredOrgs, ",") {
-		if strings.EqualFold(strings.TrimSpace(org), strings.TrimSpace(owner)) {
-			return true
-		}
-	}
-
-	return false
 }
 
 func (p *Plugin) handleSetup(_ *plugin.Context, args *model.CommandArgs, parameters []string) string {
@@ -972,7 +801,7 @@ func (p *Plugin) handleSetup(_ *plugin.Context, args *model.CommandArgs, paramet
 	return ""
 }
 
-type CommandHandleFunc func(c *plugin.Context, args *model.CommandArgs, parameters []string, userInfo *GitHubUserInfo) string
+type CommandHandleFunc func(c *plugin.Context, args *model.CommandArgs, parameters []string, userInfo *ForgejoUserInfo) string
 
 func (p *Plugin) isAuthorizedSysAdmin(userID string) (bool, error) {
 	user, err := p.client.User.Get(userID)
@@ -988,7 +817,7 @@ func (p *Plugin) isAuthorizedSysAdmin(userID string) (bool, error) {
 func (p *Plugin) ExecuteCommand(c *plugin.Context, args *model.CommandArgs) (*model.CommandResponse, *model.AppError) {
 	cmd, action, parameters := parseCommand(args.Command)
 
-	if cmd != "/github" {
+	if cmd != "/forgejo" {
 		return &model.CommandResponse{}, nil
 	}
 
@@ -1031,9 +860,9 @@ func (p *Plugin) ExecuteCommand(c *plugin.Context, args *model.CommandArgs) (*mo
 			text = "Error checking user's permissions"
 			p.client.Log.Warn(text, "error", err.Error())
 		case isSysAdmin:
-			text = fmt.Sprintf("Before using this plugin, you'll need to configure it by running `/github setup`: %s", validationErr.Error())
+			text = fmt.Sprintf("Before using this plugin, you'll need to configure it by running `/forgejo setup`: %s", validationErr.Error())
 		default:
-			text = "Please contact your system administrator to correctly configure the GitHub plugin."
+			text = "Please contact your system administrator to correctly configure the Forgejo plugin."
 		}
 
 		p.postCommandResponse(args, text)
@@ -1043,19 +872,19 @@ func (p *Plugin) ExecuteCommand(c *plugin.Context, args *model.CommandArgs) (*mo
 	if action == "connect" {
 		connectURL, err := buildPluginURL(p.client, "oauth", "connect")
 		if err != nil {
-			p.postCommandResponse(args, fmt.Sprintf("Encountered an error connecting to GitHub: %s", err.Error()))
+			p.postCommandResponse(args, fmt.Sprintf("Encountered an error connecting to Forgejo: %s", err.Error()))
 			return &model.CommandResponse{}, nil
 		}
 
 		privateAllowed := p.getConfiguration().ConnectToPrivateByDefault
 		if len(parameters) > 0 {
 			if privateAllowed {
-				p.postCommandResponse(args, fmt.Sprintf("Unknown command `%v`. Do you meant `/github connect`?", args.Command))
+				p.postCommandResponse(args, fmt.Sprintf("Unknown command `%v`. Do you meant `/forgejo connect`?", args.Command))
 				return &model.CommandResponse{}, nil
 			}
 
 			if len(parameters) != 1 || parameters[0] != "private" {
-				p.postCommandResponse(args, fmt.Sprintf("Unknown command `%v`. Do you meant `/github connect private`?", args.Command))
+				p.postCommandResponse(args, fmt.Sprintf("Unknown command `%v`. Do you meant `/forgejo connect private`?", args.Command))
 				return &model.CommandResponse{}, nil
 			}
 
@@ -1071,14 +900,14 @@ func (p *Plugin) ExecuteCommand(c *plugin.Context, args *model.CommandArgs) (*mo
 			qparams = "?private=true"
 		}
 
-		msg := fmt.Sprintf("[Click here to link your GitHub account.](%s%s)", connectURL, qparams)
+		msg := fmt.Sprintf("[Click here to link your Forgejo account.](%s%s)", connectURL, qparams)
 		p.postCommandResponse(args, msg)
 		return &model.CommandResponse{}, nil
 	}
 
 	if action == "disconnect" {
 		p.disconnectGitHubAccount(args.UserId)
-		p.postCommandResponse(args, "Disconnected your GitHub account.")
+		p.postCommandResponse(args, "Disconnected your Forgejo account.")
 		return &model.CommandResponse{}, nil
 	}
 
@@ -1086,7 +915,7 @@ func (p *Plugin) ExecuteCommand(c *plugin.Context, args *model.CommandArgs) (*mo
 	if apiErr != nil {
 		text := "Unknown error."
 		if apiErr.ID == apiErrorIDNotConnected {
-			text = "You must connect your account to GitHub first. Either click on the GitHub logo in the bottom left of the screen or enter `/github connect`."
+			text = "You must connect your account to Forgejo first. Either click on the Forgejo logo in the bottom left of the screen or enter `/forgejo connect`."
 		}
 		p.postCommandResponse(args, text)
 		return &model.CommandResponse{}, nil
@@ -1106,39 +935,39 @@ func (p *Plugin) ExecuteCommand(c *plugin.Context, args *model.CommandArgs) (*mo
 
 func getAutocompleteData(config *Configuration) *model.AutocompleteData {
 	if !config.IsOAuthConfigured() {
-		github := model.NewAutocompleteData("github", "[command]", "Available commands: setup, about")
+		forgejo := model.NewAutocompleteData("forgejo", "[command]", "Available commands: setup, about")
 
-		setup := model.NewAutocompleteData("setup", "", "Set up the GitHub plugin")
+		setup := model.NewAutocompleteData("setup", "", "Set up the Forgejo plugin")
 		setup.RoleID = model.SystemAdminRoleId
-		github.AddCommand(setup)
+		forgejo.AddCommand(setup)
 
 		about := command.BuildInfoAutocomplete("about")
-		github.AddCommand(about)
+		forgejo.AddCommand(about)
 
 		help := model.NewAutocompleteData("help", "", "Display Slash Command help text")
-		github.AddCommand(help)
+		forgejo.AddCommand(help)
 
-		return github
+		return forgejo
 	}
 
-	github := model.NewAutocompleteData("github", "[command]", "Available commands: connect, disconnect, todo, subscriptions, issue, default-repo, me, mute, settings, help, about")
+	forgejo := model.NewAutocompleteData("forgejo", "[command]", "Available commands: connect, disconnect, todo, subscriptions, issue, me, mute, settings, help, about")
 
-	connect := model.NewAutocompleteData("connect", "", "Connect your Mattermost account to your GitHub account")
+	connect := model.NewAutocompleteData("connect", "", "Connect your Mattermost account to your Forgejo account")
 	if config.EnablePrivateRepo {
 		if config.ConnectToPrivateByDefault {
-			connect = model.NewAutocompleteData("connect", "", "Connect your Mattermost account to your GitHub account. Read access to your private repositories will be requested")
+			connect = model.NewAutocompleteData("connect", "", "Connect your Mattermost account to your Forgejo account. Read access to your private repositories will be requested")
 		} else {
 			private := model.NewAutocompleteData("private", "(optional)", "If used, read access to your private repositories will be requested")
 			connect.AddCommand(private)
 		}
 	}
-	github.AddCommand(connect)
+	forgejo.AddCommand(connect)
 
-	disconnect := model.NewAutocompleteData("disconnect", "", "Disconnect your Mattermost account from your GitHub account")
-	github.AddCommand(disconnect)
+	disconnect := model.NewAutocompleteData("disconnect", "", "Disconnect your Mattermost account from your Forgejo account")
+	forgejo.AddCommand(disconnect)
 
 	todo := model.NewAutocompleteData("todo", "", "Get a list of unread messages and pull requests awaiting your review")
-	github.AddCommand(todo)
+	forgejo.AddCommand(todo)
 
 	subscriptions := model.NewAutocompleteData("subscriptions", "[command]", "Available commands: list, add, delete")
 
@@ -1147,9 +976,9 @@ func getAutocompleteData(config *Configuration) *model.AutocompleteData {
 
 	subscriptionsAdd := model.NewAutocompleteData("add", "[owner/repo] [features] [flags]", "Subscribe the current channel to receive notifications about opened pull requests and issues for an organization or repository. [features] and [flags] are optional arguments")
 	subscriptionsAdd.AddTextArgument("Owner/repo to subscribe to", "[owner/repo]", "")
-	subscriptionsAdd.AddNamedTextArgument("features", "Comma-delimited list of one or more of: issues, pulls, pulls_merged, pulls_created, pushes, creates, deletes, issue_creations, issue_comments, pull_reviews, releases, workflow_success, workflow_failure, workflow_run_failure, workflow_run_success, discussions, discussion_comments, label:\"<labelname>\". Defaults to pulls,issues,creates,deletes", "", `/[^,-\s]+(,[^,-\s]+)*/`, false)
+	subscriptionsAdd.AddNamedTextArgument("features", "Comma-delimited list of one or more of: issues, pulls, pulls_merged, pulls_created, pushes, creates, deletes, issue_creations, issue_comments, pull_reviews, releases, workflow_success, workflow_failure, discussions, discussion_comments, label:\"<labelname>\". Defaults to pulls,issues,creates,deletes", "", `/[^,-\s]+(,[^,-\s]+)*/`, false)
 
-	if config.GitHubOrg != "" {
+	if config.ForgejoOrg != "" {
 		subscriptionsAdd.AddNamedStaticListArgument("exclude-org-member", "Events triggered by organization members will not be delivered (the organization config should be set, otherwise this flag has not effect)", false, []model.AutocompleteListItem{
 			{
 				Item:     "true",
@@ -1194,49 +1023,35 @@ func getAutocompleteData(config *Configuration) *model.AutocompleteData {
 	subscriptionsDelete.AddTextArgument("Owner/repo to unsubscribe from", "[owner/repo]", "")
 	subscriptions.AddCommand(subscriptionsDelete)
 
-	github.AddCommand(subscriptions)
+	forgejo.AddCommand(subscriptions)
 
 	issue := model.NewAutocompleteData("issue", "[command]", "Available commands: create")
 
-	issueCreate := model.NewAutocompleteData("create", "[title]", "Open a dialog to create a new issue in GitHub, using the title if provided")
-	issueCreate.AddTextArgument("Title for the GitHub issue", "[title]", "")
+	issueCreate := model.NewAutocompleteData("create", "[title]", "Open a dialog to create a new issue in Forgejo, using the title if provided")
+	issueCreate.AddTextArgument("Title for the Forgejo issue", "[title]", "")
 	issue.AddCommand(issueCreate)
 
-	github.AddCommand(issue)
+	forgejo.AddCommand(issue)
 
-	defaultRepo := model.NewAutocompleteData("default-repo", "[command]", "Available commands: set, get, unset")
-	defaultRepoSet := model.NewAutocompleteData("set", "[owner/repo]", "Set the default repository for the channel")
-	defaultRepoSet.AddTextArgument("Owner/repo to set as a default repository", "[owner/repo]", "")
-
-	defaultRepoGet := model.NewAutocompleteData("get", "", "Get the default repository already set for the channel")
-
-	defaultRepoDelete := model.NewAutocompleteData("unset", "", "Unset the default repository set for the channel")
-
-	defaultRepo.AddCommand(defaultRepoSet)
-	defaultRepo.AddCommand(defaultRepoGet)
-	defaultRepo.AddCommand(defaultRepoDelete)
-
-	github.AddCommand(defaultRepo)
-
-	me := model.NewAutocompleteData("me", "", "Display the connected GitHub account")
-	github.AddCommand(me)
+	me := model.NewAutocompleteData("me", "", "Display the connected Forgejo account")
+	forgejo.AddCommand(me)
 
 	mute := model.NewAutocompleteData("mute", "[command]", "Available commands: list, add, delete, delete-all")
 
-	muteAdd := model.NewAutocompleteData("add", "[github username]", "Mute notifications from the provided GitHub user")
-	muteAdd.AddTextArgument("GitHub user to mute", "[username]", "")
+	muteAdd := model.NewAutocompleteData("add", "[forgejo username]", "Mute notifications from the provided Forgejo user")
+	muteAdd.AddTextArgument("Forgejo user to mute", "[username]", "")
 	mute.AddCommand(muteAdd)
 
-	muteDelete := model.NewAutocompleteData("delete", "[github username]", "Unmute notifications from the provided GitHub user")
-	muteDelete.AddTextArgument("GitHub user to unmute", "[username]", "")
+	muteDelete := model.NewAutocompleteData("delete", "[forgejo username]", "Unmute notifications from the provided Forgejo user")
+	muteDelete.AddTextArgument("Forgejo user to unmute", "[username]", "")
 	mute.AddCommand(muteDelete)
 
-	github.AddCommand(mute)
+	forgejo.AddCommand(mute)
 
-	muteDeleteAll := model.NewAutocompleteData("delete-all", "", "Unmute all muted GitHub users")
+	muteDeleteAll := model.NewAutocompleteData("delete-all", "", "Unmute all muted Forgejo users")
 	mute.AddCommand(muteDeleteAll)
 
-	muteList := model.NewAutocompleteData("list", "", "List muted GitHub users")
+	muteList := model.NewAutocompleteData("list", "", "List muted Forgejo users")
 	mute.AddCommand(muteList)
 
 	settings := model.NewAutocompleteData("settings", "[setting] [value]", "Update your user settings")
@@ -1266,22 +1081,34 @@ func getAutocompleteData(config *Configuration) *model.AutocompleteData {
 	remainderNotifications.AddStaticListArgument("", true, settingValue)
 	settings.AddCommand(remainderNotifications)
 
-	github.AddCommand(settings)
+	excludeTeamNotifications := model.NewAutocompleteData(settingTeamNotifications, "", "Configure team review notifications")
+	settingValue = []model.AutocompleteListItem{{
+		HelpText: "Enable team review notifications (you will be notified when your team is requested for review)",
+		Item:     "on",
+	}, {
+		HelpText: "Disable team review notifications (you will not be notified when your team is requested for review)",
+		Item:     "off",
+	}}
+	excludeTeamNotifications.AddStaticListArgument("", true, settingValue)
+	excludeTeamNotifications.AddNamedTextArgument(settingExclude, "Exclude specific repositories", "Comma-separated list of repository names to exclude from team notifications (e.g. 'repo1,repo2'). Only works when team-review-notifications is turned on", `/[^,-\s]+(,[^,-\s]+)*/`, false)
+	settings.AddCommand(excludeTeamNotifications)
+
+	forgejo.AddCommand(settings)
 
 	setup := model.NewAutocompleteData("setup", "[command]", "Available commands: oauth, webhook, announcement")
 	setup.RoleID = model.SystemAdminRoleId
-	setup.AddCommand(model.NewAutocompleteData("oauth", "", "Set up the OAuth2 Application in GitHub"))
-	setup.AddCommand(model.NewAutocompleteData("webhook", "", "Create a webhook from GitHub to Mattermost"))
-	setup.AddCommand(model.NewAutocompleteData("announcement", "", "Announce to your team that they can use GitHub integration"))
-	github.AddCommand(setup)
+	setup.AddCommand(model.NewAutocompleteData("oauth", "", "Set up the OAuth2 Application in Forgejo"))
+	setup.AddCommand(model.NewAutocompleteData("webhook", "", "Create a webhook from Forgejo to Mattermost"))
+	setup.AddCommand(model.NewAutocompleteData("announcement", "", "Announce to your team that they can use Forgejo integration"))
+	forgejo.AddCommand(setup)
 
 	help := model.NewAutocompleteData("help", "", "Display Slash Command help text")
-	github.AddCommand(help)
+	forgejo.AddCommand(help)
 
 	about := command.BuildInfoAutocomplete("about")
-	github.AddCommand(about)
+	forgejo.AddCommand(about)
 
-	return github
+	return forgejo
 }
 
 // parseCommand parses the entire command input string and retrieves the command, action and parameters
@@ -1333,4 +1160,36 @@ func parseCommand(input string) (command, action string, parameters []string) {
 	}
 
 	return command, action, parameters
+}
+
+// processTeamNotificationsExcludeFlag processes the exclude flag for team notifications
+// Returns the list of repositories and an error message if any
+func processTeamNotificationsExcludeFlag(parameters []string) ([]string, string) {
+	if len(parameters) < 2 {
+		return nil, "Must set excluded repos"
+	}
+
+	flag := parameters[0]
+	if !isFlag(flag) {
+		return nil, "Please use the correct format for flags: --<name> <value>"
+	}
+
+	parsedFlag := parseFlag(flag)
+	if parsedFlag != settingExclude {
+		return nil, "Unknown flag"
+	}
+
+	if len(parameters) > 2 {
+		return nil, "Invalid format. Repository names must be comma-separated in a single argument"
+	}
+
+	repos := strings.Split(parameters[1], ",")
+	for i := range repos {
+		repos[i] = strings.TrimSpace(repos[i])
+		if repos[i] == "" {
+			return nil, "Repository names cannot be empty"
+		}
+	}
+
+	return repos, ""
 }

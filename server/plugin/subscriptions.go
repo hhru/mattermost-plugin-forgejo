@@ -14,7 +14,6 @@ import (
 
 	"github.com/google/go-github/v54/github"
 	"github.com/pkg/errors"
-	"golang.org/x/oauth2"
 )
 
 const (
@@ -147,14 +146,6 @@ func (s *Subscription) Workflows() bool {
 	return strings.Contains(s.Features.String(), featureWorkflowFailure) || strings.Contains(s.Features.String(), featureWorkflowSuccess)
 }
 
-func (s *Subscription) WorkflowRunFailures() bool {
-	return strings.Contains(s.Features.String(), featureWorkflowRunFailure)
-}
-
-func (s *Subscription) WorkflowRunSuccesses() bool {
-	return strings.Contains(s.Features.String(), featureWorkflowRunSuccess)
-}
-
 func (s *Subscription) Release() bool {
 	return strings.Contains(s.Features.String(), featureReleases)
 }
@@ -192,8 +183,8 @@ func (s *Subscription) RenderStyle() string {
 	return s.Flags.RenderStyle
 }
 
-func (s *Subscription) excludedRepoForSub(repo *github.Repository) bool {
-	return slices.Contains(s.Flags.ExcludeRepository, repo.GetFullName())
+func (s *Subscription) excludedRepoForSub(repoFullName string) bool {
+	return slices.Contains(s.Flags.ExcludeRepository, repoFullName)
 }
 
 func (p *Plugin) Subscribe(ctx context.Context, githubClient *github.Client, userID, owner, repo, channelID string, features Features, flags SubscriptionFlags) error {
@@ -209,24 +200,18 @@ func (p *Plugin) Subscribe(ctx context.Context, githubClient *github.Client, use
 	}
 
 	if flags.ExcludeOrgMembers && !p.isOrganizationLocked() {
-		return errors.New("Unable to set --exclude-org-member flag. The GitHub plugin is not locked to a single organization.")
+		return errors.New("Unable to set --exclude-org-member flag. The Forgejo plugin is not locked to a single organization.")
 	}
 
 	if flags.IncludeOnlyOrgMembers && !p.isOrganizationLocked() {
 		return errors.New("Unable to set --include-only-org-members flag. The GitHub plugin is not locked to a single organization.")
 	}
 
-	var err, cErr error
+	var err error
 
 	if repo == "" {
 		var ghOrg *github.Organization
-		cErr = p.useGitHubClient(&GitHubUserInfo{UserID: userID}, func(info *GitHubUserInfo, token *oauth2.Token) error {
-			ghOrg, _, err = githubClient.Organizations.Get(ctx, owner)
-			if err != nil {
-				return err
-			}
-			return nil
-		})
+		ghOrg, _, err = githubClient.Organizations.Get(ctx, owner)
 		if ghOrg == nil {
 			var ghUser *github.User
 			ghUser, _, err = githubClient.Users.Get(ctx, owner)
@@ -236,20 +221,14 @@ func (p *Plugin) Subscribe(ctx context.Context, githubClient *github.Client, use
 		}
 	} else {
 		var ghRepo *github.Repository
-		cErr = p.useGitHubClient(&GitHubUserInfo{UserID: userID}, func(info *GitHubUserInfo, token *oauth2.Token) error {
-			ghRepo, _, err = githubClient.Repositories.Get(ctx, owner, repo)
-			if err != nil {
-				return err
-			}
-			return nil
-		})
+		ghRepo, _, err = githubClient.Repositories.Get(ctx, owner, repo)
 
 		if ghRepo == nil {
 			return errors.Errorf("unknown repository %s", fullNameFromOwnerAndRepo(owner, repo))
 		}
 	}
 
-	if cErr != nil {
+	if err != nil {
 		p.client.Log.Warn("Failed to get repository or org for subscribe action", "error", err.Error())
 		return errors.Errorf("Encountered an error subscribing to %s", fullNameFromOwnerAndRepo(owner, repo))
 	}
@@ -364,9 +343,8 @@ func (p *Plugin) StoreSubscriptions(s *Subscriptions) error {
 	})
 }
 
-func (p *Plugin) GetSubscribedChannelsForRepository(repo *github.Repository) []*Subscription {
-	name := repo.GetFullName()
-	name = strings.ToLower(name)
+func (p *Plugin) GetSubscribedChannelsForRepository(repoFullName string, repoIsPrivate bool) []*Subscription {
+	name := strings.ToLower(repoFullName)
 	org := strings.Split(name, "/")[0]
 	subs, err := p.GetSubscriptions()
 	if err != nil {
@@ -374,7 +352,7 @@ func (p *Plugin) GetSubscribedChannelsForRepository(repo *github.Repository) []*
 	}
 
 	// Add subscriptions for the specific repo
-	subsForRepo := []*Subscription{}
+	var subsForRepo []*Subscription
 	if subs.Repositories[name] != nil {
 		subsForRepo = append(subsForRepo, subs.Repositories[name]...)
 	}
@@ -389,13 +367,13 @@ func (p *Plugin) GetSubscribedChannelsForRepository(repo *github.Repository) []*
 		return nil
 	}
 
-	subsToReturn := []*Subscription{}
+	var subsToReturn []*Subscription
 
 	for _, sub := range subsForRepo {
-		if repo.GetPrivate() && !p.permissionToRepo(sub.CreatorID, name) {
+		if repoIsPrivate && !p.permissionToRepo(sub.CreatorID, name) {
 			continue
 		}
-		if sub.excludedRepoForSub(repo) {
+		if sub.excludedRepoForSub(repoFullName) {
 			continue
 		}
 		subsToReturn = append(subsToReturn, sub)
@@ -404,32 +382,17 @@ func (p *Plugin) GetSubscribedChannelsForRepository(repo *github.Repository) []*
 	return subsToReturn
 }
 
-type SubscriptionError struct {
-	Code  int
-	Error error
-}
-
-const (
-	SubscriptionNotFound = iota
-	SubscriptionAlreadyExists
-	InternalServerError
-)
-
-func NewSubscriptionError(code int, err error) *SubscriptionError {
-	return &SubscriptionError{Code: code, Error: err}
-}
-
-func (p *Plugin) Unsubscribe(channelID, repo, owner string) *SubscriptionError {
+func (p *Plugin) Unsubscribe(channelID, repo, owner string) error {
 	repoWithOwner := fmt.Sprintf("%s/%s", owner, repo)
 
 	subs, err := p.GetSubscriptions()
 	if err != nil {
-		return NewSubscriptionError(InternalServerError, errors.Wrap(err, "could not get subscriptions"))
+		return errors.Wrap(err, "could not get subscriptions")
 	}
 
 	repoSubs := subs.Repositories[repoWithOwner]
 	if repoSubs == nil {
-		return NewSubscriptionError(SubscriptionNotFound, errors.Errorf(SubscriptionUnavailable, strings.TrimSuffix(repoWithOwner, "/")))
+		return nil
 	}
 
 	removed := false
@@ -441,13 +404,11 @@ func (p *Plugin) Unsubscribe(channelID, repo, owner string) *SubscriptionError {
 		}
 	}
 
-	if !removed {
-		return NewSubscriptionError(SubscriptionNotFound, errors.Errorf(SubscriptionUnavailable, strings.TrimSuffix(repoWithOwner, "/")))
-	}
-
-	subs.Repositories[repoWithOwner] = repoSubs
-	if err := p.StoreSubscriptions(subs); err != nil {
-		return NewSubscriptionError(InternalServerError, errors.Wrap(err, "could not store subscriptions"))
+	if removed {
+		subs.Repositories[repoWithOwner] = repoSubs
+		if err := p.StoreSubscriptions(subs); err != nil {
+			return errors.Wrap(err, "could not store subscriptions")
+		}
 	}
 
 	return nil

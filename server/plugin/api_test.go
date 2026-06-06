@@ -63,31 +63,6 @@ func TestWithRecovery(t *testing.T) {
 	}
 }
 
-func TestConnectUserToGitHub_PrivateRepoDisabled(t *testing.T) {
-	p := NewPlugin()
-	p.setConfiguration(
-		&Configuration{
-			GitHubOrg:               "mockOrg",
-			GitHubOAuthClientID:     "mockID",
-			GitHubOAuthClientSecret: "mockSecret",
-			EncryptionKey:           "mockKey123456789",
-			EnablePrivateRepo:       false,
-		})
-	p.initializeAPI()
-	api := &plugintest.API{}
-	p.SetAPI(api)
-	p.client = pluginapi.NewClient(api, p.Driver)
-
-	req := httptest.NewRequest(http.MethodGet, "/oauth/connect?private=true", nil)
-	req.Header.Set("Mattermost-User-ID", "testuser")
-	rec := httptest.NewRecorder()
-
-	p.ServeHTTP(&plugin.Context{}, rec, req)
-
-	assert.Equal(t, http.StatusForbidden, rec.Code)
-	assert.Contains(t, rec.Body.String(), "private repositories are disabled")
-}
-
 func TestPlugin_ServeHTTP(t *testing.T) {
 	httpTestJSON := testutils.HTTPTest{
 		T:       t,
@@ -137,15 +112,15 @@ func TestPlugin_ServeHTTP(t *testing.T) {
 			p := NewPlugin()
 			p.setConfiguration(
 				&Configuration{
-					GitHubOrg:               "mockOrg",
-					GitHubOAuthClientID:     "mockID",
-					GitHubOAuthClientSecret: "mockSecret",
-					WebhookSecret:           "",
-					EnablePrivateRepo:       false,
-					EncryptionKey:           "mockKey",
-					EnterpriseBaseURL:       "",
-					EnterpriseUploadURL:     "",
-					EnableCodePreview:       "disable",
+					ForgejoOrg:               "mockOrg",
+					ForgejoOAuthClientID:     "mockID",
+					ForgejoOAuthClientSecret: "mockSecret",
+					WebhookSecret:            "",
+					EnablePrivateRepo:        false,
+					EncryptionKey:            "mockKey",
+					BaseURL:                  "",
+					UploadURL:                "",
+					EnableCodePreview:        "disable",
 				})
 			p.initializeAPI()
 			p.SetAPI(&plugintest.API{})
@@ -240,8 +215,8 @@ func TestGetToken(t *testing.T) {
 			name:   "User info not found in store",
 			userID: "mockUserID",
 			setup: func() {
-				mockAPI.On("LogError", "error occurred while getting the github user info", "UserID", MockUserID, "error", &APIErrorResponse{Message: "Unable to get user info.", StatusCode: http.StatusInternalServerError})
-				mockKvStore.EXPECT().Get("mockUserID"+githubTokenKey, gomock.Any()).Return(errors.New("not found")).Times(1)
+				mockAPI.On("LogError", "error occurred while getting the forgejo user info", "UserID", MockUserID, "error", &APIErrorResponse{Message: "Unable to get user info.", StatusCode: http.StatusInternalServerError})
+				mockKvStore.EXPECT().Get("mockUserID"+forgejoTokenKey, gomock.Any()).Return(errors.New("not found")).Times(1)
 			},
 			assertions: func(t *testing.T, rec *httptest.ResponseRecorder) {
 				assert.Equal(t, http.StatusInternalServerError, rec.Result().StatusCode)
@@ -255,10 +230,11 @@ func TestGetToken(t *testing.T) {
 			setup: func() {
 				encryptedToken, err := encrypt([]byte("dummyEncryptKey1"), MockAccessToken)
 				assert.NoError(t, err)
-				mockKvStore.EXPECT().Get("mockUserID"+githubTokenKey, gomock.Any()).DoAndReturn(func(key string, value **GitHubUserInfo) error {
-					*value = &GitHubUserInfo{
+				mockKvStore.EXPECT().Get("mockUserID"+forgejoTokenKey, gomock.Any()).DoAndReturn(func(key string, value **ForgejoUserInfo) error {
+					*value = &ForgejoUserInfo{
 						Token: &oauth2.Token{
-							AccessToken: encryptedToken,
+							AccessToken:  encryptedToken,
+							RefreshToken: encryptedToken,
 						},
 					}
 					return nil
@@ -301,10 +277,10 @@ func TestGetConfig(t *testing.T) {
 	authorizedHeader.Add("Mattermost-Plugin-ID", "somePluginId")
 
 	config := &Configuration{
-		GitHubOrg:               "mockOrg",
-		GitHubOAuthClientID:     "mockID",
-		GitHubOAuthClientSecret: "mockSecret",
-		EncryptionKey:           "mockKey",
+		ForgejoOrg:               "mockOrg",
+		ForgejoOAuthClientID:     "mockID",
+		ForgejoOAuthClientSecret: "mockSecret",
+		EncryptionKey:            "mockKey",
 	}
 
 	for name, test := range map[string]struct {
@@ -373,7 +349,7 @@ func TestGetGitHubUser(t *testing.T) {
 			requestBody: "invalid-json",
 			setup: func() {
 				mockLogger.EXPECT().WithError(gomock.Any()).Return(mockLoggerWith).Times(1)
-				mockLoggerWith.EXPECT().Warnf("Error decoding GitHubUserRequest from JSON body").Times(1)
+				mockLoggerWith.EXPECT().Warnf("Error decoding ForgejoUserRequest from JSON body").Times(1)
 			},
 			assertions: func(t *testing.T, rec *httptest.ResponseRecorder) {
 				assert.Equal(t, http.StatusBadRequest, rec.Result().StatusCode)
@@ -418,7 +394,7 @@ func TestGetGitHubUser(t *testing.T) {
 
 				var response APIErrorResponse
 				_ = json.NewDecoder(rec.Body).Decode(&response)
-				assert.Contains(t, response.Message, "User is not connected to a GitHub account.")
+				assert.Contains(t, response.Message, "User is not connected to a Forgejo account.")
 			},
 		},
 		{
@@ -427,7 +403,8 @@ func TestGetGitHubUser(t *testing.T) {
 			setup: func() {
 				dummyUserInfo, err := GetMockGHUserInfo(p)
 				assert.NoError(t, err)
-				mockKvStore.EXPECT().Get("mockUserID"+githubTokenKey, gomock.Any()).DoAndReturn(func(key string, value **GitHubUserInfo) error {
+				dummyUserInfo.Token.RefreshToken = dummyUserInfo.Token.AccessToken
+				mockKvStore.EXPECT().Get("mockUserID"+forgejoTokenKey, gomock.Any()).DoAndReturn(func(key string, value **ForgejoUserInfo) error {
 					*value = dummyUserInfo
 					return nil
 				}).Times(1)
@@ -448,7 +425,7 @@ func TestGetGitHubUser(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/github/user", strings.NewReader(tc.requestBody))
 			rec := httptest.NewRecorder()
 
-			p.getGitHubUser(mockContext, rec, req)
+			p.getForgejoUser(mockContext, rec, req)
 
 			tc.assertions(t, rec)
 		})
@@ -507,9 +484,9 @@ func TestParseRepo(t *testing.T) {
 			repoParam: "/repo",
 			setup:     func() {},
 			assertions: func(t *testing.T, owner, repo string, err error) {
+				assert.NoError(t, err)
 				assert.Equal(t, "", owner)
-				assert.Equal(t, "", repo)
-				assert.EqualError(t, err, "invalid repository")
+				assert.Equal(t, "repo", repo)
 			},
 		},
 		{
@@ -517,9 +494,9 @@ func TestParseRepo(t *testing.T) {
 			repoParam: "owner/",
 			setup:     func() {},
 			assertions: func(t *testing.T, owner, repo string, err error) {
-				assert.Equal(t, "", owner)
+				assert.NoError(t, err)
+				assert.Equal(t, "owner", owner)
 				assert.Equal(t, "", repo)
-				assert.EqualError(t, err, "invalid repository")
 			},
 		},
 	}
@@ -540,17 +517,10 @@ func TestGetRepoOwnerAndNameFromURL(t *testing.T) {
 		url           string
 		expectedOwner string
 		expectedRepo  string
-		expectError   bool
 	}{
 		{
-			name:          "GitHub API repository URL",
-			url:           "https://api.github.com/repos/owner/repo",
-			expectedOwner: "owner",
-			expectedRepo:  "repo",
-		},
-		{
-			name:          "GitHub API repository URL with trailing path",
-			url:           "https://api.github.com/repos/owner/repo/pulls/1",
+			name:          "Forgejo API repository URL",
+			url:           "https://git.example.com/api/v1/repos/owner/repo",
 			expectedOwner: "owner",
 			expectedRepo:  "repo",
 		},
@@ -560,50 +530,12 @@ func TestGetRepoOwnerAndNameFromURL(t *testing.T) {
 			expectedOwner: "owner",
 			expectedRepo:  "repo",
 		},
-		{
-			name:        "No slashes - should error",
-			url:         "crash",
-			expectError: true,
-		},
-		{
-			name:        "Empty string - should error",
-			url:         "",
-			expectError: true,
-		},
-		{
-			name:        "Single segment path - should error",
-			url:         "https://api.github.com/repos/owner",
-			expectError: true,
-		},
-		{
-			name:          "Enterprise GitHub API URL",
-			url:           "https://github.example.com/api/v3/repos/myorg/myrepo",
-			expectedOwner: "myorg",
-			expectedRepo:  "myrepo",
-		},
-		{
-			name:        "Empty owner after repos segment",
-			url:         "https://api.github.com/repos//repo",
-			expectError: true,
-		},
-		{
-			name:        "Empty repo after repos segment",
-			url:         "https://api.github.com/repos/owner/",
-			expectError: true,
-		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			owner, repo, err := getRepoOwnerAndNameFromURL(tc.url)
-			if tc.expectError {
-				assert.Error(t, err)
-				assert.Empty(t, owner)
-				assert.Empty(t, repo)
-			} else {
-				assert.NoError(t, err)
-				assert.Equal(t, tc.expectedOwner, owner)
-				assert.Equal(t, tc.expectedRepo, repo)
-			}
+			owner, repo := getRepoOwnerAndNameFromURL(tc.url)
+			assert.Equal(t, tc.expectedOwner, owner)
+			assert.Equal(t, tc.expectedRepo, repo)
 		})
 	}
 }
@@ -642,7 +574,7 @@ func TestUpdateSettings(t *testing.T) {
 				})
 				mockKvStore.EXPECT().Set(gomock.Any(), gomock.Any()).Return(false, errors.New("store error")).Times(1)
 				mockLogger.EXPECT().WithError(gomock.Any()).Return(mockLoggerWith).Times(1)
-				mockLoggerWith.EXPECT().Errorf("Failed to store GitHub user info").Times(1)
+				mockLoggerWith.EXPECT().Warnf("Failed to store Forgejo user info").Times(1)
 			},
 			expectedStatusCode: http.StatusInternalServerError,
 			assertions: func(t *testing.T, rec *httptest.ResponseRecorder) {

@@ -16,60 +16,12 @@ import (
 	"path"
 	"strconv"
 	"strings"
-	"time"
 	"unicode"
 
 	"github.com/mattermost/mattermost/server/public/pluginapi"
 
-	"github.com/google/go-github/v54/github"
 	"github.com/pkg/errors"
 )
-
-func getMentionSearchQuery(username string, orgs []string) string {
-	return buildSearchQuery("is:open mentions:%v archived:false %v", username, orgs)
-}
-
-// getReviewSearchQuery returns the GitHub search query for a user's pending review requests.
-// Drafts are excluded from the search results, but the SLA clock still runs through any draft
-// period: review_requested webhooks are recorded regardless of draft state, so a PR that was
-// review-requested while draft and later un-drafted retains its original SLA start time.
-func getReviewSearchQuery(username string, orgs []string) string {
-	return buildSearchQuery("is:pr is:open draft:false review-requested:%v archived:false %v", username, orgs)
-}
-
-func getYourPrsSearchQuery(username string, orgs []string) string {
-	return buildSearchQuery("is:pr is:open author:%v archived:false %v", username, orgs)
-}
-
-func getYourAssigneeSearchQuery(username string, orgs []string) string {
-	return buildSearchQuery("is:open assignee:%v archived:false %v", username, orgs)
-}
-
-func getIssuesSearchQuery(searchValue, searchTerm string) string {
-	query := "is:open is:issue archived:false %v %v"
-	searchField := ""
-	if len(searchValue) != 0 {
-		searchField = fmt.Sprintf("org:%v", searchValue)
-	}
-
-	// get all the issues which involve the user in case no organizational lock is set
-	// else {
-	// 	searchField = "involves:@me"
-	// }
-
-	return fmt.Sprintf(query, searchField, searchTerm)
-}
-
-func buildSearchQuery(query, username string, orgs []string) string {
-	orgField := ""
-	for _, org := range orgs {
-		if len(org) != 0 {
-			orgField = fmt.Sprintf("%s org:%s", orgField, org)
-		}
-	}
-
-	return fmt.Sprintf(query, username, orgField)
-}
 
 func pad(src []byte) []byte {
 	padding := aes.BlockSize - len(src)%aes.BlockSize
@@ -159,32 +111,41 @@ func parseOwnerAndRepo(full, baseURL string) (string, string) {
 	return owner, repo
 }
 
-func parseGitHubUsernamesFromText(text string) []string {
+func parseForgejoUsernamesFromText(text string) []string {
 	usernameMap := map[string]bool{}
 	usernames := []string{}
 
 	for _, word := range strings.FieldsFunc(text, func(c rune) bool {
-		return c != '-' && c != '@' && !unicode.IsLetter(c) && !unicode.IsNumber(c)
+		return c != '-' && c != '@' && c != '.' && !unicode.IsLetter(c) && !unicode.IsNumber(c)
 	}) {
+		word = strings.Trim(word, ".")
 		if len(word) < 2 || word[0] != '@' {
 			continue
 		}
 
+		// Skip if starts or ends with hyphen
 		if word[1] == '-' || word[len(word)-1] == '-' {
 			continue
 		}
-
+		// Skip if contains consecutive hyphens
 		if strings.Contains(word, "--") {
 			continue
 		}
-
+		// Skip if contains consecutive dots
+		if strings.Contains(word, "..") {
+			continue
+		}
 		name := word[1:]
+		// Skip if starts with dot
+		if name[0] == '.' {
+			continue
+		}
+
 		if !usernameMap[name] {
 			usernames = append(usernames, name)
 			usernameMap[name] = true
 		}
 	}
-
 	return usernames
 }
 
@@ -193,7 +154,7 @@ func fixGithubNotificationSubjectURL(url, issueNum string) string {
 	url = strings.Replace(url, "repos/", "", 1)
 	url = strings.Replace(url, "/pulls/", "/pull/", 1)
 	url = strings.Replace(url, "/commits/", "/commit/", 1)
-	url = strings.Replace(url, "/api/v3", "", 1)
+	url = strings.Replace(url, "/api/v1", "", 1)
 	url = strings.Replace(url, "comments/", issueNum+"#issuecomment-", 1)
 	return url
 }
@@ -333,15 +294,15 @@ func getCodeMarkdown(user, repo, repoPath, word, lines string, isTruncated bool)
 }
 
 // getToDoDisplayText returns the text to be displayed in todo listings.
-func getToDoDisplayText(baseURL, title, url, notifType string, repository *github.Repository) string {
+func getToDoDisplayText(baseURL, title, url, notifType string, repository *FRepository) string {
 	var owner, repo, repoURL, titlePart string
 	if repository == nil {
 		owner, repo = parseOwnerAndRepo(url, baseURL)
 		repoURL = fmt.Sprintf("%s%s/%s", baseURL, owner, repo)
 	} else {
-		owner = repository.GetOwner().GetLogin()
-		repo = repository.GetName()
-		repoURL = repository.GetHTMLURL()
+		owner = *repository.Owner.Login
+		repo = *repository.Name
+		repoURL = *repository.HTMLURL
 	}
 
 	repoWords := strings.Split(repo, "-")
@@ -364,81 +325,6 @@ func getToDoDisplayText(baseURL, title, url, notifType string, repository *githu
 	}
 
 	return fmt.Sprintf("* %s %s %s\n", repoPart, notifType, titlePart)
-}
-
-// slaCalendarDiffDays returns dueDate minus today in calendar days (negative when the review is overdue).
-func slaCalendarDiffDays(createdAt github.Timestamp, targetDays int, now time.Time) int {
-	if targetDays <= 0 || createdAt.IsZero() {
-		return 0
-	}
-
-	c := createdAt.UTC()
-	createdDay := time.Date(c.Year(), c.Month(), c.Day(), 0, 0, 0, 0, time.UTC)
-	dueDay := createdDay.AddDate(0, 0, targetDays)
-
-	n := now.UTC()
-	todayDay := time.Date(n.Year(), n.Month(), n.Day(), 0, 0, 0, 0, time.UTC)
-
-	return int(dueDay.Sub(todayDay) / (24 * time.Hour))
-}
-
-// formatChannelOverduePRBody formats the per-PR portion of an overdue-SLA digest line:
-// "<owner>/<repo> - [<title>](<url>)". The reviewer column and list-bullet prefix are
-// composed by the caller so the digest can group several of a reviewer's overdue PRs under
-// a single reviewer header without duplicating their @-mention on every row. When owner/repo
-// cannot be parsed from htmlURL the raw URL is used as the repo display, so nothing renders
-// as a bare " / ". Long titles are truncated to 200 chars + "...".
-func formatChannelOverduePRBody(title, htmlURL, baseURL string) string {
-	owner, repo := parseOwnerAndRepo(htmlURL, baseURL)
-	repoDisplay := fmt.Sprintf("%s/%s", owner, repo)
-	if owner == "" || repo == "" {
-		repoDisplay = htmlURL
-	}
-	if len(title) > 200 {
-		title = strings.TrimSpace(title[:200]) + "..."
-	}
-	titleDisplay := title
-	if htmlURL != "" {
-		titleDisplay = fmt.Sprintf("[%s](%s)", escapeMarkdownLinkText(title), htmlURL)
-	}
-	return fmt.Sprintf("%s - %s", repoDisplay, titleDisplay)
-}
-
-// escapeMarkdownLinkText escapes characters that would break a markdown link's display text.
-// We only escape `]` and `\` so that titles containing brackets (common in JIRA-prefixed PRs)
-// do not terminate the link early.
-func escapeMarkdownLinkText(s string) string {
-	if s == "" {
-		return s
-	}
-	r := strings.NewReplacer(`\`, `\\`, `]`, `\]`)
-	return r.Replace(s)
-}
-
-// reviewSLAMarkdown returns a Markdown SLA suffix for Mattermost posts and whether the review is overdue.
-func reviewSLAMarkdown(createdAt github.Timestamp, targetDays int, now time.Time) (suffix string, overdue bool) {
-	if targetDays <= 0 || createdAt.IsZero() {
-		return "", false
-	}
-
-	diffDays := slaCalendarDiffDays(createdAt, targetDays, now)
-
-	if diffDays < 0 {
-		overdueCount := -diffDays
-		unit := "days"
-		if overdueCount == 1 {
-			unit = "day"
-		}
-		return fmt.Sprintf(` **(:calendar: %d %s overdue)**`, overdueCount, unit), true
-	}
-	if diffDays == 0 {
-		return ` *(:calendar: Due today)*`, false
-	}
-	unit := "days"
-	if diffDays == 1 {
-		unit = "day"
-	}
-	return fmt.Sprintf(` *(:calendar: Due in %d %s)*`, diffDays, unit), false
 }
 
 // isValidURL checks if a given URL is a valid URL with a host and a http or http scheme.
