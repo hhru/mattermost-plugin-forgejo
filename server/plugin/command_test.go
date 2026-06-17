@@ -349,7 +349,7 @@ func TestHandleTeamReviewNotifications(t *testing.T) {
 				},
 			},
 			SetupMockStore: func(mks *mocks.MockKvStore) {
-				mks.EXPECT().Set("test-userID"+forgejoTokenKey, gomock.Any(), gomock.Any()).DoAndReturn(func(key string, value interface{}, options ...pluginapi.KVSetOption) (bool, error) {
+				mks.EXPECT().Set("test-userID"+forgejoTokenKey, gomock.Any(), gomock.Any()).DoAndReturn(func(key string, value any, options ...pluginapi.KVSetOption) (bool, error) {
 					userInfo, ok := value.(*ForgejoUserInfo)
 					require.True(t, ok, "value should be *ForgejoUserInfo")
 					assert.Equal(t, "test-userID", userInfo.UserID)
@@ -374,7 +374,7 @@ func TestHandleTeamReviewNotifications(t *testing.T) {
 				},
 			},
 			SetupMockStore: func(mks *mocks.MockKvStore) {
-				mks.EXPECT().Set("test-userID"+forgejoTokenKey, gomock.Any(), gomock.Any()).DoAndReturn(func(key string, value interface{}, options ...pluginapi.KVSetOption) (bool, error) {
+				mks.EXPECT().Set("test-userID"+forgejoTokenKey, gomock.Any(), gomock.Any()).DoAndReturn(func(key string, value any, options ...pluginapi.KVSetOption) (bool, error) {
 					userInfo, ok := value.(*ForgejoUserInfo)
 					require.True(t, ok, "value should be *ForgejoUserInfo")
 					assert.Equal(t, "test-userID", userInfo.UserID)
@@ -431,7 +431,7 @@ func TestHandleTeamReviewNotifications(t *testing.T) {
 				},
 			},
 			SetupMockStore: func(mks *mocks.MockKvStore) {
-				mks.EXPECT().Set("test-userID"+forgejoTokenKey, gomock.Any(), gomock.Any()).DoAndReturn(func(key string, value interface{}, options ...pluginapi.KVSetOption) (bool, error) {
+				mks.EXPECT().Set("test-userID"+forgejoTokenKey, gomock.Any(), gomock.Any()).DoAndReturn(func(key string, value any, options ...pluginapi.KVSetOption) (bool, error) {
 					userInfo, ok := value.(*ForgejoUserInfo)
 					require.True(t, ok, "value should be *ForgejoUserInfo")
 					assert.Equal(t, "test-userID", userInfo.UserID)

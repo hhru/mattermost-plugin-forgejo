@@ -136,7 +136,7 @@ func TestIgnoreRequestedReview(t *testing.T) {
 			if tt.userInfo != nil {
 				mockKvStore.EXPECT().
 					Get("test-userID"+forgejoTokenKey, gomock.Any()).
-					DoAndReturn(func(key string, value interface{}) error {
+					DoAndReturn(func(key string, value any) error {
 						*(value.(**ForgejoUserInfo)) = tt.userInfo
 						return nil
 					}).

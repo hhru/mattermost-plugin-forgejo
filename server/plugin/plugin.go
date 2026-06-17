@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 
@@ -50,18 +51,16 @@ const (
 	invalidTokenError = "401 Bad credentials" //#nosec G101 -- False positive
 )
 
-var (
-	// testOAuthServerURL is the URL for the oauthServer used for testing purposes
-	// It should be set through ldflags when compiling for E2E, and keep it blank otherwise
-	testOAuthServerURL = ""
-)
+// testOAuthServerURL is the URL for the oauthServer used for testing purposes
+// It should be set through ldflags when compiling for E2E, and keep it blank otherwise
+var testOAuthServerURL = ""
 
 type KvStore interface {
 	Set(key string, value any, options ...pluginapi.KVSetOption) (bool, error)
 	ListKeys(page int, count int, options ...pluginapi.ListKeysOption) ([]string, error)
 	Get(key string, o any) error
 	Delete(key string) error
-	SetAtomicWithRetries(key string, valueFunc func(oldValue []byte) (newValue interface{}, err error)) error
+	SetAtomicWithRetries(key string, valueFunc func(oldValue []byte) (newValue any, err error)) error
 }
 
 type Plugin struct {
@@ -694,7 +693,7 @@ func (p *Plugin) handleRevokedToken(info *ForgejoUserInfo) {
 func (p *Plugin) openIssueCreateModal(userID string, channelID string, title string) {
 	p.client.Frontend.PublishWebSocketEvent(
 		wsEventCreateIssue,
-		map[string]interface{}{
+		map[string]any{
 			"title":      title,
 			"channel_id": channelID,
 		},
@@ -797,10 +796,11 @@ func (p *Plugin) GetToDo(info *ForgejoUserInfo) (string, error) {
 	}
 	notifications := makeForgejoRequest[[]FNotification](p, forgejoClient, fmt.Sprintf("%sapi/v1/notifications", baseURL))
 
-	text := "##### Unread Messages\n"
+	var text strings.Builder
+	text.WriteString("##### Unread Messages\n")
 
 	notificationCount := 0
-	notificationContent := ""
+	var notificationContent strings.Builder
 	for _, n := range notifications {
 		if n.Repository == nil {
 			p.client.Log.Warn("Unable to get repository for notification in todo list. Skipping.")
@@ -816,7 +816,7 @@ func (p *Plugin) GetToDo(info *ForgejoUserInfo) (string, error) {
 		switch notificationType {
 		case "RepositoryVulnerabilityAlert":
 			message := fmt.Sprintf("[Vulnerability Alert for %v](%v)", n.Repository.FullName, fixGithubNotificationSubjectURL(*n.Subject.URL, ""))
-			notificationContent += fmt.Sprintf("* %v\n", message)
+			fmt.Fprintf(&notificationContent, "* %v\n", message)
 		default:
 			issueURL := *n.Subject.URL
 			issueNumIndex := strings.LastIndex(issueURL, "/")
@@ -828,56 +828,56 @@ func (p *Plugin) GetToDo(info *ForgejoUserInfo) (string, error) {
 
 			notificationTitle := *notificationSubject.Title
 			notificationURL := fixGithubNotificationSubjectURL(subjectURL, issueNum)
-			notificationContent += getToDoDisplayText(baseURL, notificationTitle, notificationURL, notificationType, n.Repository)
+			notificationContent.WriteString(getToDoDisplayText(baseURL, notificationTitle, notificationURL, notificationType, n.Repository))
 		}
 
 		notificationCount++
 	}
 
 	if notificationCount == 0 {
-		text += "You don't have any unread messages.\n"
+		text.WriteString("You don't have any unread messages.\n")
 	} else {
-		text += fmt.Sprintf("You have %v unread messages:\n", notificationCount)
-		text += notificationContent
+		fmt.Fprintf(&text, "You have %v unread messages:\n", notificationCount)
+		text.WriteString(notificationContent.String())
 	}
 
-	text += "##### Review Requests\n"
+	text.WriteString("##### Review Requests\n")
 
 	if len(resultReview) == 0 {
-		text += "You don't have any pull requests awaiting your review.\n"
+		text.WriteString("You don't have any pull requests awaiting your review.\n")
 	} else {
-		text += fmt.Sprintf("You have %v pull requests awaiting your review:\n", len(resultReview))
+		fmt.Fprintf(&text, "You have %v pull requests awaiting your review:\n", len(resultReview))
 
 		for _, pr := range resultReview {
-			text += getToDoDisplayText(baseURL, pr.GetTitle(), pr.GetHTMLURL(), "", nil)
+			text.WriteString(getToDoDisplayText(baseURL, pr.GetTitle(), pr.GetHTMLURL(), "", nil))
 		}
 	}
 
-	text += "##### Your Open Pull Requests\n"
+	text.WriteString("##### Your Open Pull Requests\n")
 
 	if len(resultOpenPR) == 0 {
-		text += "You don't have any open pull requests.\n"
+		text.WriteString("You don't have any open pull requests.\n")
 	} else {
-		text += fmt.Sprintf("You have %v open pull requests:\n", len(resultOpenPR))
+		fmt.Fprintf(&text, "You have %v open pull requests:\n", len(resultOpenPR))
 
 		for _, pr := range resultOpenPR {
-			text += getToDoDisplayText(baseURL, pr.GetTitle(), pr.GetHTMLURL(), "", nil)
+			text.WriteString(getToDoDisplayText(baseURL, pr.GetTitle(), pr.GetHTMLURL(), "", nil))
 		}
 	}
 
-	text += "##### Your Assignments\n"
+	text.WriteString("##### Your Assignments\n")
 
 	if len(resultAssignee) == 0 {
-		text += "You don't have any assignments.\n"
+		text.WriteString("You don't have any assignments.\n")
 	} else {
-		text += fmt.Sprintf("You have %v assignments:\n", len(resultAssignee))
+		fmt.Fprintf(&text, "You have %v assignments:\n", len(resultAssignee))
 
 		for _, assign := range resultAssignee {
-			text += getToDoDisplayText(baseURL, assign.GetTitle(), assign.GetHTMLURL(), "", nil)
+			text.WriteString(getToDoDisplayText(baseURL, assign.GetTitle(), assign.GetHTMLURL(), "", nil))
 		}
 	}
 
-	return text, nil
+	return text.String(), nil
 }
 
 func makeForgejoRequest[T any](p *Plugin, forgejoClient *http.Client, requestURL string) T {
@@ -887,7 +887,7 @@ func makeForgejoRequest[T any](p *Plugin, forgejoClient *http.Client, requestURL
 		p.client.Log.Error("Failed Forgejo request", "url", requestURL, "error", err.Error())
 		return result
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 
 	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
 		p.client.Log.Error("Error decoding Plugin JSON body", err.Error())
@@ -945,10 +945,8 @@ func (p *Plugin) checkOrg(org string) error {
 		return nil
 	}
 
-	for _, configOrg := range orgList {
-		if configOrg == strings.ToLower(org) {
-			return nil
-		}
+	if slices.Contains(orgList, strings.ToLower(org)) {
+		return nil
 	}
 
 	return errors.Errorf("only repositories in the %v organization(s) are supported", config.ForgejoOrg)
@@ -1022,8 +1020,8 @@ func (p *Plugin) sendRefreshEvent(userID string) {
 	)
 }
 
-func (s *SidebarContent) toMap() (map[string]interface{}, error) {
-	var m map[string]interface{}
+func (s *SidebarContent) toMap() (map[string]any, error) {
+	var m map[string]any
 	bytes, err := json.Marshal(&s)
 	if err != nil {
 		return nil, err

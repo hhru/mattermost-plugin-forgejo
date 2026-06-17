@@ -20,7 +20,7 @@ var repo = github.Repository{
 
 var fRepo = FRepository{
 	FullName: sToP("mattermost-plugin-forgejo"),
-	//StargazersCount: iToP(1),
+	// StargazersCount: iToP(1),
 	HTMLURL: sToP("https://github.com/mattermost/mattermost-plugin-github"),
 }
 
@@ -43,8 +43,8 @@ var pullRequest = github.PullRequest{
 	Number:    iToP(42),
 	HTMLURL:   sToP("https://github.com/mattermost/mattermost-plugin-github/pull/42"),
 	Title:     sToP("Leverage git-get-head"),
-	CreatedAt: tToP(time.Date(2019, 04, 01, 02, 03, 04, 0, time.UTC)),
-	UpdatedAt: tToP(time.Date(2019, 05, 01, 02, 03, 04, 0, time.UTC)),
+	CreatedAt: tToP(time.Date(2019, 0o4, 0o1, 0o2, 0o3, 0o4, 0, time.UTC)),
+	UpdatedAt: tToP(time.Date(2019, 0o5, 0o1, 0o2, 0o3, 0o4, 0, time.UTC)),
 	Body: sToP(`<!-- Thank you for opening this pull request-->git-get-head gets the non-sent upstream heads inside the stashed non-cleaned applied areas, and after pruning bases to many archives, you can initialize the origin of the bases.
 <!-- Please make sure you have done the following :
 - Added tests
@@ -57,8 +57,8 @@ var fPullRequest = FPullRequest{
 	HTMLURL: sToP("https://github.com/mattermost/mattermost-plugin-github/pull/42"),
 	Title:   sToP("Leverage git-get-head"),
 	// TODO: check event and add if exists
-	//CreatedAt: tToP(time.Date(2019, 04, 01, 02, 03, 04, 0, time.UTC)),
-	//UpdatedAt: tToP(time.Date(2019, 05, 01, 02, 03, 04, 0, time.UTC)),
+	// CreatedAt: tToP(time.Date(2019, 04, 01, 02, 03, 04, 0, time.UTC)),
+	// UpdatedAt: tToP(time.Date(2019, 05, 01, 02, 03, 04, 0, time.UTC)),
 	Body: sToP(`<!-- Thank you for opening this pull request-->git-get-head gets the non-sent upstream heads inside the stashed non-cleaned applied areas, and after pruning bases to many archives, you can initialize the origin of the bases.
 <!-- Please make sure you have done the following :
 - Added tests
@@ -70,8 +70,8 @@ var pullRequestWithMentions = github.PullRequest{
 	Number:    iToP(42),
 	HTMLURL:   sToP("https://github.com/mattermost/mattermost-plugin-github/pull/42"),
 	Title:     sToP("Leverage git-get-head"),
-	CreatedAt: tToP(time.Date(2019, 04, 01, 02, 03, 04, 0, time.UTC)),
-	UpdatedAt: tToP(time.Date(2019, 05, 01, 02, 03, 04, 0, time.UTC)),
+	CreatedAt: tToP(time.Date(2019, 0o4, 0o1, 0o2, 0o3, 0o4, 0, time.UTC)),
+	UpdatedAt: tToP(time.Date(2019, 0o5, 0o1, 0o2, 0o3, 0o4, 0, time.UTC)),
 	Body: sToP(`<!-- Thank you for opening this pull request-->git-get-head gets the non-sent upstream heads inside the stashed non-cleaned applied areas, and after pruning bases to many archives, you can initialize the origin of the bases.
 ` + gitHubMentions + `
 <!-- Please make sure you have done the following :
@@ -84,8 +84,8 @@ var pullRequestWithLabelAndAssignee = github.PullRequest{
 	Number:    iToP(42),
 	HTMLURL:   sToP("https://github.com/mattermost/mattermost-plugin-github/pull/42"),
 	Title:     sToP("Leverage git-get-head"),
-	CreatedAt: tToP(time.Date(2019, 04, 01, 02, 03, 04, 0, time.UTC)),
-	UpdatedAt: tToP(time.Date(2019, 05, 01, 02, 03, 04, 0, time.UTC)),
+	CreatedAt: tToP(time.Date(2019, 0o4, 0o1, 0o2, 0o3, 0o4, 0, time.UTC)),
+	UpdatedAt: tToP(time.Date(2019, 0o5, 0o1, 0o2, 0o3, 0o4, 0, time.UTC)),
 	Body: sToP(`<!-- Thank you for opening this pull request-->git-get-head gets the non-sent upstream heads inside the stashed non-cleaned applied areas, and after pruning bases to many archives, you can initialize the origin of the bases.
 <!-- Please make sure you have done the following :
 - Added tests
@@ -99,8 +99,8 @@ var pullRequestWithMultipleLabelsAndAssignees = github.PullRequest{
 	Number:    iToP(42),
 	HTMLURL:   sToP("https://github.com/mattermost/mattermost-plugin-github/pull/42"),
 	Title:     sToP("Leverage git-get-head"),
-	CreatedAt: tToP(time.Date(2019, 04, 01, 02, 03, 04, 0, time.UTC)),
-	UpdatedAt: tToP(time.Date(2019, 05, 01, 02, 03, 04, 0, time.UTC)),
+	CreatedAt: tToP(time.Date(2019, 0o4, 0o1, 0o2, 0o3, 0o4, 0, time.UTC)),
+	UpdatedAt: tToP(time.Date(2019, 0o5, 0o1, 0o2, 0o3, 0o4, 0, time.UTC)),
 	Body: sToP(`<!-- Thank you for opening this pull request-->git-get-head gets the non-sent upstream heads inside the stashed non-cleaned applied areas, and after pruning bases to many archives, you can initialize the origin of the bases.
 <!-- Please make sure you have done the following :
 - Added tests
@@ -114,8 +114,8 @@ var mergedPullRequest = github.PullRequest{
 	Number:    iToP(42),
 	HTMLURL:   sToP("https://github.com/mattermost/mattermost-plugin-github/pull/42"),
 	Title:     sToP("Leverage git-get-head"),
-	CreatedAt: tToP(time.Date(2019, 04, 01, 02, 03, 04, 0, time.UTC)),
-	UpdatedAt: tToP(time.Date(2019, 05, 01, 02, 03, 04, 0, time.UTC)),
+	CreatedAt: tToP(time.Date(2019, 0o4, 0o1, 0o2, 0o3, 0o4, 0, time.UTC)),
+	UpdatedAt: tToP(time.Date(2019, 0o5, 0o1, 0o2, 0o3, 0o4, 0, time.UTC)),
 	Body: sToP(`<!-- Thank you for opening this pull request-->git-get-head gets the non-sent upstream heads inside the stashed non-cleaned applied areas, and after pruning bases to many archives, you can initialize the origin of the bases.
 <!-- Please make sure you have done the following :
 - Added tests
@@ -128,8 +128,8 @@ var issue = github.Issue{
 	Number:    iToP(1),
 	HTMLURL:   sToP("https://github.com/mattermost/mattermost-plugin-github/issues/1"),
 	Title:     sToP("Implement git-get-head"),
-	CreatedAt: tToP(time.Date(2019, 04, 01, 02, 03, 04, 0, time.UTC)),
-	UpdatedAt: tToP(time.Date(2019, 05, 01, 02, 03, 04, 0, time.UTC)),
+	CreatedAt: tToP(time.Date(2019, 0o4, 0o1, 0o2, 0o3, 0o4, 0, time.UTC)),
+	UpdatedAt: tToP(time.Date(2019, 0o5, 0o1, 0o2, 0o3, 0o4, 0, time.UTC)),
 	Body:      sToP(`<!-- Thank you for opening this issue-->git-get-head sounds like a great feature we should support`),
 }
 
@@ -137,8 +137,8 @@ var issueWithMentions = github.Issue{
 	Number:    iToP(1),
 	HTMLURL:   sToP("https://github.com/mattermost/mattermost-plugin-github/issues/1"),
 	Title:     sToP("Implement git-get-head"),
-	CreatedAt: tToP(time.Date(2019, 04, 01, 02, 03, 04, 0, time.UTC)),
-	UpdatedAt: tToP(time.Date(2019, 05, 01, 02, 03, 04, 0, time.UTC)),
+	CreatedAt: tToP(time.Date(2019, 0o4, 0o1, 0o2, 0o3, 0o4, 0, time.UTC)),
+	UpdatedAt: tToP(time.Date(2019, 0o5, 0o1, 0o2, 0o3, 0o4, 0, time.UTC)),
 	Body: sToP(`<!-- Thank you for opening this issue-->git-get-head sounds like a great feature we should support
 ` + gitHubMentions),
 }
@@ -147,8 +147,8 @@ var issueWithLabelAndAssignee = github.Issue{
 	Number:    iToP(1),
 	HTMLURL:   sToP("https://github.com/mattermost/mattermost-plugin-github/issues/1"),
 	Title:     sToP("Implement git-get-head"),
-	CreatedAt: tToP(time.Date(2019, 04, 01, 02, 03, 04, 0, time.UTC)),
-	UpdatedAt: tToP(time.Date(2019, 05, 01, 02, 03, 04, 0, time.UTC)),
+	CreatedAt: tToP(time.Date(2019, 0o4, 0o1, 0o2, 0o3, 0o4, 0, time.UTC)),
+	UpdatedAt: tToP(time.Date(2019, 0o5, 0o1, 0o2, 0o3, 0o4, 0, time.UTC)),
 	Body:      sToP(`<!-- Thank you for opening this issue-->git-get-head sounds like a great feature we should support`),
 	Labels:    singleLabel,
 	Assignee:  &user,
@@ -159,8 +159,8 @@ var issueWithMultipleLabelsAndAssignee = github.Issue{
 	Number:    iToP(1),
 	HTMLURL:   sToP("https://github.com/mattermost/mattermost-plugin-github/issues/1"),
 	Title:     sToP("Implement git-get-head"),
-	CreatedAt: tToP(time.Date(2019, 04, 01, 02, 03, 04, 0, time.UTC)),
-	UpdatedAt: tToP(time.Date(2019, 05, 01, 02, 03, 04, 0, time.UTC)),
+	CreatedAt: tToP(time.Date(2019, 0o4, 0o1, 0o2, 0o3, 0o4, 0, time.UTC)),
+	UpdatedAt: tToP(time.Date(2019, 0o5, 0o1, 0o2, 0o3, 0o4, 0, time.UTC)),
 	Body:      sToP(`<!-- Thank you for opening this issue-->git-get-head sounds like a great feature we should support`),
 	Labels:    labels,
 	Assignees: []*github.User{&user, &user},
@@ -617,25 +617,49 @@ func TestReopenedIssueTemplate(t *testing.T) {
 }
 
 func TestIssueLabelledTemplate(t *testing.T) {
-	expected := `
+	t.Run("without collapsed render style", func(t *testing.T) {
+		expected := `
 #### Implement git-get-head
 ##### [mattermost-plugin-forgejo#1](https://github.com/mattermost/mattermost-plugin-github/issues/1)
 #issue-labeled ` + "`label-name`" + ` by [panda](https://github.com/panda).
 `
 
-	actual, err := renderTemplate("issueLabelled", GetEventWithRenderConfig(
-		&github.IssuesEvent{
-			Repo:  &repo,
-			Issue: &issue,
-			Label: &github.Label{
-				Name: sToP("label-name"),
+		actual, err := renderTemplate("issueLabelled", GetEventWithRenderConfig(
+			&github.IssuesEvent{
+				Repo:  &repo,
+				Issue: &issue,
+				Label: &github.Label{
+					Name: sToP("label-name"),
+				},
+				Sender: &user,
 			},
-			Sender: &user,
-		},
-		nil,
-	))
-	require.NoError(t, err)
-	require.Equal(t, expected, actual)
+			nil,
+		))
+		require.NoError(t, err)
+		require.Equal(t, expected, actual)
+	})
+
+	t.Run("with collapsed render style", func(t *testing.T) {
+		expected := `
+[\[mattermost-plugin-forgejo\]](https://github.com/mattermost/mattermost-plugin-github) issue [#1 Implement git-get-head](https://github.com/mattermost/mattermost-plugin-github/issues/1) labeled ` + "`label-name`" + `  by [panda](https://github.com/panda).
+`
+
+		actual, err := renderTemplate("issueLabelled", &EventWithRenderConfig{
+			Event: &github.IssuesEvent{
+				Repo:  &repo,
+				Issue: &issue,
+				Label: &github.Label{
+					Name: sToP("label-name"),
+				},
+				Sender: &user,
+			},
+			Config: RenderConfig{
+				Style: "collapsed",
+			},
+		})
+		require.NoError(t, err)
+		require.Equal(t, expected, actual)
+	})
 }
 
 func TestPushedCommitsTemplate(t *testing.T) {

@@ -296,7 +296,7 @@ func (fm *FlowManager) stepDelegateQuestion() flow.Step {
 		})
 }
 
-func (fm *FlowManager) submitDelegateSelection(f *flow.Flow, submitted map[string]interface{}) (flow.Name, flow.State, map[string]string, error) {
+func (fm *FlowManager) submitDelegateSelection(f *flow.Flow, submitted map[string]any) (flow.Name, flow.State, map[string]string, error) {
 	delegateIDRaw, ok := submitted["delegate"]
 	if !ok {
 		return "", nil, nil, errors.New("delegate missing")
@@ -351,7 +351,6 @@ func (fm *FlowManager) stepBase() flow.Step {
 				SubmitLabel:      "Save & continue",
 				Elements: []model.DialogElement{
 					{
-
 						DisplayName: "Base URL",
 						Name:        "base_url",
 						Type:        "text",
@@ -377,7 +376,7 @@ func (fm *FlowManager) stepBase() flow.Step {
 		WithButton(cancelButton())
 }
 
-func (fm *FlowManager) submitBaseConfig(f *flow.Flow, submitted map[string]interface{}) (flow.Name, flow.State, map[string]string, error) {
+func (fm *FlowManager) submitBaseConfig(f *flow.Flow, submitted map[string]any) (flow.Name, flow.State, map[string]string, error) {
 	errorList := map[string]string{}
 
 	baseURLRaw, ok := submitted["base_url"]
@@ -497,7 +496,7 @@ func (fm *FlowManager) stepOAuthInput() flow.Step {
 		WithButton(cancelButton())
 }
 
-func (fm *FlowManager) submitOAuthConfig(f *flow.Flow, submitted map[string]interface{}) (flow.Name, flow.State, map[string]string, error) {
+func (fm *FlowManager) submitOAuthConfig(f *flow.Flow, submitted map[string]any) (flow.Name, flow.State, map[string]string, error) {
 	errorList := map[string]string{}
 
 	clientIDRaw, ok := submitted["client_id"]
@@ -590,7 +589,6 @@ The final setup step requires a Mattermost System Admin to create a webhook for 
 				SubmitLabel: "Create",
 				Elements: []model.DialogElement{
 					{
-
 						DisplayName: "Forgejo repository or organization name",
 						Name:        "repo_org",
 						Type:        "text",
@@ -609,7 +607,7 @@ The final setup step requires a Mattermost System Admin to create a webhook for 
 		})
 }
 
-func (fm *FlowManager) submitWebhook(f *flow.Flow, submitted map[string]interface{}) (flow.Name, flow.State, map[string]string, error) {
+func (fm *FlowManager) submitWebhook(f *flow.Flow, submitted map[string]any) (flow.Name, flow.State, map[string]string, error) {
 	repoOrgRaw, ok := submitted["repo_org"]
 	if !ok {
 		return "", nil, nil, errors.New("repo_org missing")
@@ -635,7 +633,7 @@ func (fm *FlowManager) submitWebhook(f *flow.Flow, submitted map[string]interfac
 		fm.client.Log.Warn("Failed to build webHookURL", "err", err)
 	}
 
-	webhookConfig := map[string]interface{}{
+	webhookConfig := map[string]any{
 		"content_type": "json",
 		"insecure_ssl": "0",
 		"secret":       config.WebhookSecret,
@@ -769,7 +767,7 @@ func (fm *FlowManager) stepAnnouncementQuestion() flow.Step {
 		})
 }
 
-func (fm *FlowManager) submitChannelAnnouncement(f *flow.Flow, submitted map[string]interface{}) (flow.Name, flow.State, map[string]string, error) {
+func (fm *FlowManager) submitChannelAnnouncement(f *flow.Flow, submitted map[string]any) (flow.Name, flow.State, map[string]string, error) {
 	channelIDRaw, ok := submitted["channel_id"]
 	if !ok {
 		return "", nil, nil, errors.New("channel_id missing")
@@ -815,9 +813,11 @@ func (fm *FlowManager) stepAnnouncementConfirmation() flow.Step {
 }
 
 func printGithubErrorResponse(err *github.ErrorResponse) error {
-	msg := err.Message
-	for _, err := range err.Errors {
-		msg += ", " + err.Message
+	var sb strings.Builder
+	sb.WriteString(err.Message)
+	for _, e := range err.Errors {
+		sb.WriteString(", ")
+		sb.WriteString(e.Message)
 	}
-	return errors.New(msg)
+	return errors.New(sb.String())
 }

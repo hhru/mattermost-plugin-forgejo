@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -49,16 +50,14 @@ const (
 	forgejoEventHeader                 = "X-Forgejo-Event"
 )
 
-var (
-	eventTypeMapping = map[string]interface{}{
-		"issue_comment":         &FIssueCommentEvent{},
-		"pull_request":          &FPullRequestEvent{},
-		"pull_request_comment":  &FPullRequestReviewCommentEvent{},
-		"pull_request_approved": &FPullRequestReviewEvent{},
-		"pull_request_rejected": &FPullRequestReviewEvent{},
-		"push":                  &FPushEvent{},
-	}
-)
+var eventTypeMapping = map[string]any{
+	"issue_comment":         &FIssueCommentEvent{},
+	"pull_request":          &FPullRequestEvent{},
+	"pull_request_comment":  &FPullRequestReviewCommentEvent{},
+	"pull_request_approved": &FPullRequestReviewEvent{},
+	"pull_request_rejected": &FPullRequestReviewEvent{},
+	"push":                  &FPushEvent{},
+}
 
 // RenderConfig holds various configuration options to be used in a template
 // for rendering an event.
@@ -69,7 +68,7 @@ type RenderConfig struct {
 // EventWithRenderConfig holds an event along with configuration options for
 // rendering.
 type EventWithRenderConfig struct {
-	Event  interface{}
+	Event  any
 	Config RenderConfig
 	Label  string
 }
@@ -108,7 +107,7 @@ func signBody(secret, body []byte) ([]byte, error) {
 
 // GetEventWithRenderConfig wraps any forgejo Event into an EventWithRenderConfig
 // which also contains per-subscription configuration options.
-func GetEventWithRenderConfig(event interface{}, sub *Subscription) *EventWithRenderConfig {
+func GetEventWithRenderConfig(event any, sub *Subscription) *EventWithRenderConfig {
 	style := ""
 	subscriptionLabel := ""
 	if sub != nil {
@@ -219,7 +218,7 @@ func (p *Plugin) handleWebhook(w http.ResponseWriter, r *http.Request) {
 
 	forgejoEventHeader := r.Header.Get(forgejoEventHeader)
 	eventType, ok := eventTypeMapping[forgejoEventHeader]
-	var event interface{}
+	var event any
 	if ok {
 		event = reflect.New(reflect.TypeOf(eventType).Elem()).Interface()
 		r := json.Unmarshal(body, &event)
@@ -542,7 +541,7 @@ func (p *Plugin) postPullRequestEvent(event *FPullRequestEvent) {
 
 func (p *Plugin) sanitizeDescription(description string) string {
 	if strings.Contains(description, "<details>") {
-		var policy = bluemonday.StrictPolicy()
+		policy := bluemonday.StrictPolicy()
 		policy.SkipElementsContent("details")
 		description = html.UnescapeString(policy.Sanitize(description))
 	}
@@ -1160,14 +1159,8 @@ func (p *Plugin) handleCommentAssigneeNotification(event *FIssueCommentEvent) {
 	mentionedUsernames := parseForgejoUsernamesFromText(*event.Comment.Body)
 
 	for _, assignee := range assignees {
-		usernameMentioned := false
 		template := templateName
-		for _, username := range mentionedUsernames {
-			if username == *assignee.Login {
-				usernameMentioned = true
-				break
-			}
-		}
+		usernameMentioned := slices.Contains(mentionedUsernames, *assignee.Login)
 
 		if usernameMentioned {
 			switch eventType {
@@ -1305,12 +1298,7 @@ func (p *Plugin) ignoreRequestedReview(event *FPullRequestEvent, requestedUserID
 		return false
 	}
 	currentRepo := *event.Repo.FullName
-	for _, excludedRepo := range excludedRepos {
-		if excludedRepo == currentRepo {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(excludedRepos, currentRepo)
 }
 
 func (p *Plugin) handleIssueNotification(event *github.IssuesEvent) {
