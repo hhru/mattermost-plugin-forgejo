@@ -14,13 +14,12 @@ import (
 )
 
 const (
-	SubscriptionsKey          = "subscriptions"
-	flagExcludeOrgMember      = "exclude-org-member"
-	flagRenderStyle           = "render-style"
-	flagFeatures              = "features"
-	flagExcludeRepository     = "exclude"
-	SubscriptionUnavailable   = "no subscription exists for `%s` in the channel"
-	flagIncludeOnlyOrgMembers = "include-only-org-members"
+	SubscriptionsKey        = "subscriptions"
+	flagExcludeOrgMember    = "exclude-org-member"
+	flagRenderStyle         = "render-style"
+	flagFeatures            = "features"
+	flagExcludeRepository   = "exclude"
+	SubscriptionUnavailable = "no subscription exists for `%s` in the channel"
 )
 
 type SubscriptionFlags struct {
@@ -129,6 +128,14 @@ func (s *Subscription) Stars() bool {
 
 func (s *Subscription) Workflows() bool {
 	return strings.Contains(s.Features.String(), featureWorkflowFailure) || strings.Contains(s.Features.String(), featureWorkflowSuccess)
+}
+
+func (s *Subscription) WorkflowRunFailures() bool {
+	return strings.Contains(s.Features.String(), featureWorkflowRunFailure)
+}
+
+func (s *Subscription) WorkflowRunSuccesses() bool {
+	return strings.Contains(s.Features.String(), featureWorkflowRunSuccess)
 }
 
 func (s *Subscription) Release() bool {

@@ -279,6 +279,34 @@ type FUser struct {
 	HTMLURL *string `json:"html_url,omitempty"`
 }
 
+func (u *FUser) GetLogin() string {
+	if u == nil || u.Login == nil {
+		return ""
+	}
+	return *u.Login
+}
+
+func (e *FPullRequestEvent) GetSender() *FUser {
+	if e == nil {
+		return nil
+	}
+	return e.Sender
+}
+
+func (e *FIssueCommentEvent) GetSender() *FUser {
+	if e == nil {
+		return nil
+	}
+	return e.Sender
+}
+
+func (e *FPullRequestReviewEvent) GetSender() *FUser {
+	if e == nil {
+		return nil
+	}
+	return e.Sender
+}
+
 type FMilestone struct {
 	Title *string `json:"title,omitempty"`
 }
@@ -487,6 +515,10 @@ func (p *Plugin) connectUserToForgejo(c *Context, w http.ResponseWriter, r *http
 	privateAllowed := false
 	pValBool, _ := strconv.ParseBool(r.URL.Query().Get("private"))
 	if pValBool {
+		if !p.getConfiguration().EnablePrivateRepo {
+			http.Error(w, "private repositories are disabled", http.StatusForbidden)
+			return
+		}
 		privateAllowed = true
 	}
 
@@ -529,7 +561,7 @@ func (p *Plugin) connectUserToForgejo(c *Context, w http.ResponseWriter, r *http
 		}
 
 		if errorMsg != "" {
-			_, err := p.poster.DMWithAttachments(c.UserID, &model.SlackAttachment{
+			_, err := p.poster.DMWithAttachments(c.UserID, &model.SlackAttachment{ //nolint:staticcheck // poster.DMWithAttachments requires SlackAttachment
 				Text:  fmt.Sprintf("There was an error connecting to your Forgejo: `%s` Please double check your configuration.", errorMsg),
 				Color: string(flow.ColorDanger),
 			})
@@ -909,9 +941,21 @@ func (p *Plugin) getPrsDetails(c *UserContext, w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	prDetails := make([]*PRDetails, len(prList))
+	var validPRs []*PRDetails
+	for _, pr := range prList {
+		if pr == nil {
+			continue
+		}
+		if _, _, err := getRepoOwnerAndNameFromURL(pr.URL); err != nil {
+			c.Log.WithError(err).Warnf("Skipping PR with invalid URL")
+			continue
+		}
+		validPRs = append(validPRs, pr)
+	}
+
+	prDetails := make([]*PRDetails, len(validPRs))
 	var wg sync.WaitGroup
-	for i, pr := range prList {
+	for i, pr := range validPRs {
 		wg.Go(func() {
 			prDetail := p.fetchPRDetails(c, githubClient, pr.URL, pr.Number)
 			prDetails[i] = prDetail
@@ -930,7 +974,16 @@ func (p *Plugin) fetchPRDetails(c *UserContext, client *github.Client, prURL str
 	requestedReviewers := []*string{}
 	// reviewsList := []*github.PullRequestReview{}
 
-	repoOwner, repoName := getRepoOwnerAndNameFromURL(prURL)
+	repoOwner, repoName, err := getRepoOwnerAndNameFromURL(prURL)
+	if err != nil {
+		c.Log.WithError(err).Warnf("Invalid PR URL")
+		return &PRDetails{
+			URL:                prURL,
+			Number:             prNumber,
+			RequestedReviewers: requestedReviewers,
+			Reviews:            []string{},
+		}
+	}
 
 	var wg sync.WaitGroup
 
@@ -970,9 +1023,34 @@ func (p *Plugin) fetchPRDetails(c *UserContext, client *github.Client, prURL str
 	}
 }
 
-func getRepoOwnerAndNameFromURL(url string) (string, string) {
-	splitted := strings.Split(url, "/")
-	return splitted[len(splitted)-2], splitted[len(splitted)-1]
+func getRepoOwnerAndNameFromURL(rawURL string) (string, string, error) {
+	if rawURL == "" {
+		return "", "", fmt.Errorf("URL must not be empty")
+	}
+
+	var segments []string
+	if parsed, err := url.Parse(rawURL); err == nil && parsed.Scheme != "" {
+		segments = strings.Split(strings.Trim(parsed.Path, "/"), "/")
+	} else {
+		segments = strings.Split(strings.Trim(rawURL, "/"), "/")
+	}
+
+	hasReposSegment := false
+	for i, seg := range segments {
+		if seg == "repos" {
+			hasReposSegment = true
+			if i+2 < len(segments) && segments[i+1] != "" && segments[i+2] != "" {
+				return segments[i+1], segments[i+2], nil
+			}
+			break
+		}
+	}
+
+	if !hasReposSegment && len(segments) == 2 && segments[0] != "" && segments[1] != "" {
+		return segments[0], segments[1], nil
+	}
+
+	return "", "", fmt.Errorf("invalid repository URL %q: expected owner/repo or an API URL containing /repos/owner/repo", rawURL)
 }
 
 func (p *Plugin) searchIssues(c *UserContext, w http.ResponseWriter, r *http.Request) {
@@ -1076,6 +1154,11 @@ func (p *Plugin) createIssueComment(c *UserContext, w http.ResponseWriter, r *ht
 	}
 	if post == nil {
 		p.writeAPIError(w, &APIErrorResponse{ID: "", Message: "failed to load post " + req.PostID + ": not found", StatusCode: http.StatusNotFound})
+		return
+	}
+
+	if !p.client.User.HasPermissionToChannel(c.UserID, post.ChannelId, model.PermissionCreatePost) {
+		p.writeAPIError(w, &APIErrorResponse{ID: "", Message: "not authorized to post in this channel", StatusCode: http.StatusForbidden})
 		return
 	}
 
@@ -1796,6 +1879,11 @@ func (p *Plugin) createIssue(c *UserContext, w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	if issue.PostID == "" && !p.client.User.HasPermissionToChannel(c.UserID, issue.ChannelID, model.PermissionCreatePost) {
+		p.writeAPIError(w, &APIErrorResponse{ID: "", Message: "not authorized to post in this channel", StatusCode: http.StatusForbidden})
+		return
+	}
+
 	mmMessage := ""
 	var post *model.Post
 	permalink := ""
@@ -1808,6 +1896,11 @@ func (p *Plugin) createIssue(c *UserContext, w http.ResponseWriter, r *http.Requ
 		}
 		if post == nil {
 			p.writeAPIError(w, &APIErrorResponse{ID: "", Message: "failed to load post " + issue.PostID + ": not found", StatusCode: http.StatusNotFound})
+			return
+		}
+
+		if !p.client.User.HasPermissionToChannel(c.UserID, post.ChannelId, model.PermissionCreatePost) {
+			p.writeAPIError(w, &APIErrorResponse{ID: "", Message: "not authorized to post in this channel", StatusCode: http.StatusForbidden})
 			return
 		}
 
@@ -1850,9 +1943,11 @@ func (p *Plugin) createIssue(c *UserContext, w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	splittedRepo := strings.Split(issue.Repo, "/")
-	owner := splittedRepo[0]
-	repoName := splittedRepo[1]
+	owner, repoName, err := parseRepo(issue.Repo)
+	if err != nil {
+		p.writeAPIError(w, &APIErrorResponse{ID: "", Message: "invalid repository: " + issue.Repo, StatusCode: http.StatusBadRequest})
+		return
+	}
 
 	githubClient := p.githubConnectUser(c.Ctx, c.GHInfo)
 	var resp *github.Response
@@ -1945,7 +2040,7 @@ func parseRepo(repoParam string) (owner, repo string, err error) {
 	}
 
 	splitted := strings.Split(repoParam, "/")
-	if len(splitted) != 2 {
+	if len(splitted) != 2 || splitted[0] == "" || splitted[1] == "" {
 		return "", "", errors.New("invalid repository")
 	}
 

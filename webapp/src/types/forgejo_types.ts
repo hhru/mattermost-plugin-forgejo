@@ -24,6 +24,9 @@ export type ForgejoItem = PrsDetailsData & {
     id: number;
     title: string;
     created_at: string;
+
+    /** When set, instant used for review SLA (review request time if plugin recorded it). */
+    review_sla_start?: string;
     updated_at: string;
     html_url: string;
     repository_url?: string;
@@ -53,6 +56,12 @@ export type ForgejoItem = PrsDetailsData & {
 export type ForgejoItemsProps = {
     items: ForgejoItem[];
     theme: Theme;
+
+    /** When true, render an SLA-status badge (Overdue / Due today / Due in N days) next to each item. */
+    showReviewSLA?: boolean;
+
+    /** SLA target in days, used to compute the badge. Falsy disables the badge regardless of showReviewSLA. */
+    reviewTargetDays?: number;
 }
 
 export type UserSettingsData = {
@@ -73,6 +82,7 @@ export type ConnectedData = {
 
 export type ConfigurationData = {
     left_sidebar_enabled: boolean;
+    review_target_days?: number;
 }
 
 export type PrsDetailsData = {
@@ -157,7 +167,8 @@ export type SidebarData = {
     yourAssignments: ForgejoIssueData[],
     unreads: UnreadsData[]
     orgs: string[],
-    rhsState?: string | null
+    rhsState?: string | null,
+    reviewTargetDays: number,
 }
 
 export type Organization = {

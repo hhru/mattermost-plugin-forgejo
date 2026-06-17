@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	testToken = "ycbODW-BWbNBGfF7ac4T5RL5ruNm5BChCXgbkY1bWHqMt80JTkLsicQwo8de3tqfqlfMaglpgjqGOmSHeGp0dA==" //nolint:gosec // test fixture, not a real credential
+	testToken = "SVC7hd3f1caK6Xi9vG_pMgYLnnoSkVrnD8c4HMgVeEiLG1AmeScsQxyrDF0pYhuF" //nolint:gosec // test fixture, not a real credential (encrypts "forgejo-test-token" with mockKey123456789)
 )
 
 // Function to get the plugin object for test cases.
@@ -39,6 +39,11 @@ func getPluginTest(api *plugintest.API, mockKvStore *mocks.MockKvStore) *Plugin 
 
 	p.SetAPI(api)
 	p.client = pluginapi.NewClient(api, p.Driver)
+
+	// public 0.3.0 routes pluginapi log calls through the API mock; tolerate them.
+	api.On("LogWarn", mock.Anything, mock.Anything, mock.Anything).Maybe()
+	api.On("LogError", mock.Anything, mock.Anything, mock.Anything).Maybe()
+	api.On("LogDebug", mock.Anything, mock.Anything, mock.Anything).Maybe()
 
 	return p
 }

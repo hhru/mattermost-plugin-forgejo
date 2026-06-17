@@ -119,7 +119,7 @@ func init() {
 
 	funcMap["workflowJobFailedStep"] = func(steps []*FTaskStep) string {
 		for _, step := range steps {
-			if step.GetConclusion() == workflowJobFail {
+			if step.GetConclusion() == workflowConclusionFailure {
 				return step.GetName()
 			}
 		}
@@ -476,6 +476,8 @@ Assignees: {{range $i, $el := .Assignees -}} {{- if $i}}, {{end}}{{template "FUs
 		"    	* `pull_reviews` - includes pull request reviews\n" +
 		"    	* `workflow_failure` - includes workflow job failure\n" +
 		"    	* `workflow_success` - includes workflow job success\n" +
+		"    	* `workflow_run_failure` - includes workflow run failures (failures, cancellations, timeouts)\n" +
+		"    	* `workflow_run_success` - includes workflow run successes\n" +
 		"    	* `releases` - includes release created and deleted\n" +
 		"    	* `label:<labelname>` - limit pull request and issue events to only this label. Must include `pulls` or `issues` in feature list when using a label.\n" +
 		"    	* `discussions` - includes new discussions\n" +
@@ -514,6 +516,12 @@ It now has **{{.GetRepo.GetStargazersCount}}** stars.`))
 {{if eq .GetWorkflowJob.GetConclusion "failure"}}Job failed: {{template "workflowJob" .GetWorkflowJob}}
 Step failed: {{.GetWorkflowJob.Steps | workflowJobFailedStep}}
 {{end}}Commit: {{.GetRepo.GetHTMLURL}}/commit/{{.GetWorkflowJob.GetHeadSHA}}`))
+
+	template.Must(masterTemplate.New("workflowRunCompleted").Funcs(funcMap).Parse(`
+{{template "repo" .GetRepo}} Workflow [{{.GetWorkflow.GetName}}]({{.GetWorkflowRun.GetHTMLURL}}) {{if eq .GetWorkflowRun.GetConclusion "success"}}succeeded :white_check_mark:{{else if eq .GetWorkflowRun.GetConclusion "failure"}}failed :x:{{else if eq .GetWorkflowRun.GetConclusion "cancelled"}}was cancelled :no_entry_sign:{{else if eq .GetWorkflowRun.GetConclusion "timed_out"}}timed out :warning:{{else}}completed with conclusion: {{.GetWorkflowRun.GetConclusion}}{{end}}
+Branch: ` + "`" + `{{.GetWorkflowRun.GetHeadBranch}}` + "`" + ` | Run [#{{.GetWorkflowRun.GetRunNumber}}]({{.GetWorkflowRun.GetHTMLURL}}) | Triggered by {{template "user" .GetSender}}
+Commit: {{.GetRepo.GetHTMLURL}}/commit/{{.GetWorkflowRun.GetHeadSHA}}`))
+
 	template.Must(masterTemplate.New("newReleaseEvent").Funcs(funcMap).Parse(`
 {{template "repo" .GetRepo}} {{template "user" .GetSender}}
 {{- if eq .GetAction "created" }} created a release {{template "release" .GetRelease}}
@@ -525,7 +533,11 @@ Step failed: {{.GetWorkflowJob.Steps | workflowJobFailedStep}}
 `))
 
 	template.Must(masterTemplate.New("newDiscussionComment").Funcs(funcMap).Parse(`
-{{template "repo" .GetRepo}} New comment by {{template "user" .GetSender}} on discussion [#{{.GetDiscussion.GetNumber}} {{.GetDiscussion.GetTitle}}]({{.GetDiscussion.GetHTMLURL}}):
+{{template "repo" .GetRepo}}
+{{- if eq .GetAction "created" }} New comment
+{{- else if eq .GetAction "edited" }} Comment edited
+{{- else if eq .GetAction "deleted" }} Comment deleted
+{{- end }} by {{template "user" .GetSender}} on discussion [#{{.GetDiscussion.GetNumber}} {{.GetDiscussion.GetTitle}}]({{.GetDiscussion.GetHTMLURL}}):
 
 {{.GetComment.GetBody | trimBody | replaceAllForgejoUsernames}}
 `))

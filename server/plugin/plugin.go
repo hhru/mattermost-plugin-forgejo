@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/google/go-github/v54/github"
 	"github.com/gorilla/mux"
@@ -20,7 +21,7 @@ import (
 	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/mattermost/mattermost/server/public/plugin"
 	"github.com/mattermost/mattermost/server/public/pluginapi"
-	"github.com/mattermost/mattermost/server/public/pluginapi/experimental/bot/logger"
+	"github.com/mattermost/mattermost/server/public/pluginapi/cluster"
 	"github.com/mattermost/mattermost/server/public/pluginapi/experimental/bot/poster"
 )
 
@@ -29,6 +30,8 @@ const (
 	forgejoOauthKey       = "forgejooauthkey_"
 	forgejoUsernameKey    = "_forgejousername"
 	forgejoPrivateRepoKey = "_forgejoprivate"
+
+	reEncryptMutexKey = "reencrypt_user_data_mutex"
 
 	wsEventConnect    = "connect"
 	wsEventDisconnect = "disconnect"
@@ -278,6 +281,7 @@ func (p *Plugin) OnActivate() error {
 	p.flowManager = flowManager
 
 	registerForgejoToUsernameMappingCallback(p.getGitHubToUsernameMapping)
+
 	return nil
 }
 
@@ -638,8 +642,24 @@ func (p *Plugin) getGitHubToUsernameMapping(githubUsername string) string {
 }
 
 func (p *Plugin) disconnectGitHubAccount(userID string) {
-	userInfo, _ := p.getGitHubUserInfo(userID)
-	if userInfo == nil {
+	userInfo, apiErr := p.getGitHubUserInfo(userID)
+	if apiErr != nil {
+		if apiErr.ID == apiErrorIDNotConnected {
+			return
+		}
+
+		p.client.Log.Warn("Failed to load user info for disconnect, falling back to force-disconnect",
+			"user_id", userID, "error", apiErr.Message)
+		var rawInfo *ForgejoUserInfo
+		if err := p.store.Get(userID+forgejoTokenKey, &rawInfo); err != nil {
+			p.client.Log.Warn("Failed to load raw user info during fallback disconnect",
+				"user_id", userID, "error", err.Error())
+		}
+		forgejoUsername := ""
+		if rawInfo != nil {
+			forgejoUsername = rawInfo.ForgejoUsername
+		}
+		p.forceDisconnectUser(userID, forgejoUsername)
 		return
 	}
 
@@ -648,7 +668,11 @@ func (p *Plugin) disconnectGitHubAccount(userID string) {
 	}
 
 	if err := p.store.Delete(userInfo.ForgejoUsername + forgejoUsernameKey); err != nil {
-		p.client.Log.Warn("Failed to delete forgejo token from KV store", "userID", userID, "error", err.Error())
+		p.client.Log.Warn("Failed to delete forgejo username mapping from KV store", "userID", userID, "error", err.Error())
+	}
+
+	if err := p.store.Delete(userID + forgejoPrivateRepoKey); err != nil {
+		p.client.Log.Warn("Failed to delete forgejo private repo key from KV store", "userID", userID, "error", err.Error())
 	}
 
 	user, err := p.client.User.Get(userID)
@@ -660,7 +684,7 @@ func (p *Plugin) disconnectGitHubAccount(userID string) {
 			delete(user.Props, "git_user")
 			err := p.client.User.Update(user)
 			if err != nil {
-				p.client.Log.Warn("Failed to get update user props", "userID", userID, "error", err.Error())
+				p.client.Log.Warn("Failed to update user props", "userID", userID, "error", err.Error())
 			}
 		}
 	}
@@ -690,6 +714,167 @@ func (p *Plugin) handleRevokedToken(info *ForgejoUserInfo) {
 	p.CreateBotDMPost(info.UserID, "Your Forgejo account was disconnected due to an invalid or revoked authorization token. Reconnect your account using the `/forgejo connect` command.", "custom_git_revoked_token")
 }
 
+// reEncryptUserData re-encrypts all connected users' tokens when the encryption
+// key changes. Users whose tokens cannot be migrated are force-disconnected and
+// notified to reconnect. A cluster mutex ensures only one node performs the
+// migration in HA setups.
+func (p *Plugin) reEncryptUserData(newEncryptionKey, previousEncryptionKey string) {
+	m, err := cluster.NewMutex(p.API, reEncryptMutexKey)
+	if err != nil {
+		p.client.Log.Warn("Failed to create cluster mutex for encryption key rotation", "error", err.Error())
+		return
+	}
+	m.Lock()
+	defer m.Unlock()
+
+	checker := func(key string) (keep bool, err error) {
+		return strings.HasSuffix(key, forgejoTokenKey), nil
+	}
+
+	var allKeys []string
+	for page := 0; ; page++ {
+		keys, err := p.store.ListKeys(page, keysPerPage, pluginapi.WithChecker(checker))
+		if err != nil {
+			p.client.Log.Warn("Encryption key changed but failed to list user keys for re-encryption, proceeding with keys collected so far",
+				"page", fmt.Sprintf("%d", page), "keys_collected", fmt.Sprintf("%d", len(allKeys)), "error", err.Error())
+			break
+		}
+		allKeys = append(allKeys, keys...)
+		if len(keys) < keysPerPage {
+			break
+		}
+	}
+
+	if len(allKeys) == 0 {
+		return
+	}
+
+	auditRec := plugin.MakeAuditRecord("reEncryptUserData", model.AuditStatusFail)
+	defer p.API.LogAuditRec(auditRec)
+	model.AddEventParameterAuditableToAuditRec(auditRec, "re_encrypt_user_data", ReEncryptUserDataAuditParams{
+		TotalUsers: len(allKeys),
+	})
+
+	p.client.Log.Info("Encryption key changed, re-encrypting user tokens",
+		"user_count", fmt.Sprintf("%d", len(allKeys)))
+
+	var migrated, forceDisconnected int
+	for _, key := range allKeys {
+		userID := strings.TrimSuffix(key, forgejoTokenKey)
+
+		forgejoUsername, err := p.reEncryptUserToken(key, newEncryptionKey, previousEncryptionKey)
+		if err != nil {
+			p.client.Log.Warn("Failed to re-encrypt user token during encryption key rotation",
+				"user_id", userID, "error", err.Error())
+			auditRec.AddErrorDesc(fmt.Sprintf("user %s: %s", userID, err.Error()))
+			p.forceDisconnectUser(userID, forgejoUsername)
+			forceDisconnected++
+		} else {
+			migrated++
+		}
+	}
+
+	if forceDisconnected == 0 {
+		auditRec.Success()
+	}
+	auditRec.AddEventResultState(ReEncryptUserDataAuditResult{
+		Migrated:          migrated,
+		ForceDisconnected: forceDisconnected,
+	})
+}
+
+// reEncryptUserToken decrypts a single user's tokens with the old key and
+// re-encrypts them with the new key. Returns the Forgejo username (best-effort,
+// may be empty) and any error encountered.
+func (p *Plugin) reEncryptUserToken(kvKey, newEncryptionKey, previousEncryptionKey string) (string, error) {
+	var userInfo *ForgejoUserInfo
+	if err := p.store.Get(kvKey, &userInfo); err != nil {
+		return "", errors.Wrap(err, "could not load user info")
+	}
+	if userInfo == nil {
+		return "", errors.New("user info not found")
+	}
+
+	if userInfo.Token == nil || userInfo.Token.AccessToken == "" {
+		return userInfo.ForgejoUsername, errors.New("user has no token to re-encrypt")
+	}
+
+	if _, err := decrypt([]byte(newEncryptionKey), userInfo.Token.AccessToken); err == nil {
+		return userInfo.ForgejoUsername, nil
+	}
+
+	plainAccess, err := decrypt([]byte(previousEncryptionKey), userInfo.Token.AccessToken)
+	if err != nil {
+		return userInfo.ForgejoUsername, errors.Wrap(err, "could not decrypt access token with previous key")
+	}
+	userInfo.Token.AccessToken = plainAccess
+
+	if userInfo.Token.RefreshToken != "" {
+		plainRefresh, rErr := decrypt([]byte(previousEncryptionKey), userInfo.Token.RefreshToken)
+		if rErr != nil {
+			return userInfo.ForgejoUsername, errors.Wrap(rErr, "could not decrypt refresh token with previous key")
+		}
+		userInfo.Token.RefreshToken = plainRefresh
+	}
+
+	// storeGitHubUserInfo encrypts both tokens with the active (new) encryption key.
+	if err := p.storeGitHubUserInfo(userInfo); err != nil {
+		return userInfo.ForgejoUsername, errors.Wrap(err, "could not store re-encrypted token")
+	}
+
+	return userInfo.ForgejoUsername, nil
+}
+
+// forceDisconnectUser performs a best-effort cleanup of a user's encrypted
+// data and notifies them to reconnect
+func (p *Plugin) forceDisconnectUser(userID, forgejoUsername string) {
+	if err := p.store.Delete(userID + forgejoTokenKey); err != nil {
+		p.client.Log.Warn("forceDisconnectUser: failed to delete forgejo token",
+			"user_id", userID, "error", err.Error())
+	}
+
+	if err := p.store.Delete(userID + forgejoPrivateRepoKey); err != nil {
+		p.client.Log.Warn("forceDisconnectUser: failed to delete forgejo private repo key",
+			"user_id", userID, "error", err.Error())
+	}
+
+	user, err := p.client.User.Get(userID)
+	if err != nil {
+		p.client.Log.Warn("forceDisconnectUser: failed to get user props",
+			"user_id", userID, "error", err.Error())
+	} else {
+		if forgejoUsername == "" {
+			if gitUser, ok := user.Props["git_user"]; ok {
+				forgejoUsername = gitUser
+			}
+		}
+		if _, ok := user.Props["git_user"]; ok {
+			delete(user.Props, "git_user")
+			if err := p.client.User.Update(user); err != nil {
+				p.client.Log.Warn("forceDisconnectUser: failed to update user props",
+					"user_id", userID, "error", err.Error())
+			}
+		}
+	}
+
+	if forgejoUsername != "" {
+		if err := p.store.Delete(forgejoUsername + forgejoUsernameKey); err != nil {
+			p.client.Log.Warn("forceDisconnectUser: failed to delete username mapping",
+				"user_id", userID, "error", err.Error())
+		}
+	}
+
+	p.client.Frontend.PublishWebSocketEvent(
+		wsEventDisconnect,
+		nil,
+		&model.WebsocketBroadcast{UserId: userID},
+	)
+
+	p.CreateBotDMPost(userID,
+		"Your Forgejo connection has been reset due to a change in the plugin configuration. Please reconnect your account using `/forgejo connect`.",
+		"custom_git_disconnect")
+}
+
 func (p *Plugin) openIssueCreateModal(userID string, channelID string, title string) {
 	p.client.Frontend.PublishWebSocketEvent(
 		wsEventCreateIssue,
@@ -713,14 +898,29 @@ func (p *Plugin) CreateBotDMPost(userID, message, postType string) {
 	post := &model.Post{
 		UserId:    p.BotUserID,
 		ChannelId: channel.Id,
-		Message:   message,
+		Message:   truncatePostMessage(message),
 		Type:      postType,
 	}
 
 	if err = p.client.Post.CreatePost(post); err != nil {
-		p.client.Log.Warn("Failed to create DM post", "userID", userID, "post", post, "error", err.Error())
+		p.client.Log.Warn("Failed to create DM post", "user_id", userID, "channel_id", post.ChannelId, "error", err.Error())
 		return
 	}
+}
+
+func truncatePostMessage(message string) string {
+	const truncationMarker = "\n\n_… message truncated_"
+
+	if utf8.RuneCountInString(message) <= model.PostMessageMaxRunesV2 {
+		return message
+	}
+
+	keep := model.PostMessageMaxRunesV2 - utf8.RuneCountInString(truncationMarker)
+	if keep <= 0 {
+		return string([]rune(truncationMarker)[:model.PostMessageMaxRunesV2])
+	}
+
+	return string([]rune(message)[:keep]) + truncationMarker
 }
 
 func (p *Plugin) CheckIfDuplicateDailySummary(userID, text string) (bool, error) {
@@ -974,64 +1174,18 @@ func (p *Plugin) isOrganizationLocked() bool {
 }
 
 func (p *Plugin) sendRefreshEvent(userID string) {
-	eventLogger := logger.New(p.API).With(logger.LogContext{
-		"userid": userID,
-	})
-
-	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
-
-	context := &Context{
-		Ctx:    ctx,
-		UserID: userID,
-		Log:    eventLogger,
-	}
-
-	defer cancel()
-
-	info, apiErr := p.getGitHubUserInfo(context.UserID)
-	if apiErr != nil {
+	if _, apiErr := p.getGitHubUserInfo(userID); apiErr != nil {
 		if apiErr.ID != apiErrorIDNotConnected {
 			p.client.Log.Debug("Failed to get forgejo user info", "error", apiErr.Error())
 		}
 		return
 	}
 
-	userContext := &UserContext{
-		Context: *context,
-		GHInfo:  info,
-	}
-
-	sidebarContent, err := p.getSidebarData(userContext)
-	if err != nil {
-		p.client.Log.Warn("Failed to get the sidebar data", "error", err.Error())
-		return
-	}
-
-	contentMap, err := sidebarContent.toMap()
-	if err != nil {
-		p.client.Log.Warn("Failed to convert sidebar content to map", "error", err.Error())
-		return
-	}
-
 	p.client.Frontend.PublishWebSocketEvent(
 		wsEventRefresh,
-		contentMap,
+		nil,
 		&model.WebsocketBroadcast{UserId: userID},
 	)
-}
-
-func (s *SidebarContent) toMap() (map[string]any, error) {
-	var m map[string]any
-	bytes, err := json.Marshal(&s)
-	if err != nil {
-		return nil, err
-	}
-
-	if err = json.Unmarshal(bytes, &m); err != nil {
-		return nil, err
-	}
-
-	return m, nil
 }
 
 // getUsername returns the Forgejo username for a given Mattermost user,

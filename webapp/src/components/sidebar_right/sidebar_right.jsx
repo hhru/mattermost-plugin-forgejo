@@ -72,6 +72,7 @@ export default class SidebarRight extends React.PureComponent {
         yourPrs: PropTypes.arrayOf(PropTypes.object),
         yourAssignments: PropTypes.arrayOf(PropTypes.object),
         rhsState: PropTypes.string,
+        reviewTargetDays: PropTypes.number,
         theme: PropTypes.object.isRequired,
         actions: PropTypes.shape({
             getYourPrsDetails: PropTypes.func.isRequired,
@@ -166,6 +167,8 @@ export default class SidebarRight extends React.PureComponent {
                         <ForgejoItems
                             items={forgejoItems}
                             theme={this.props.theme}
+                            showReviewSLA={rhsState === RHSStates.REVIEWS}
+                            reviewTargetDays={this.props.reviewTargetDays || 0}
                         />
                     </div>
                 </Scrollbars>

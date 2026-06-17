@@ -32,6 +32,8 @@ const (
 	featureReleases           = "releases"
 	featureWorkflowFailure    = "workflow_failure"
 	featureWorkflowSuccess    = "workflow_success"
+	featureWorkflowRunFailure = "workflow_run_failure"
+	featureWorkflowRunSuccess = "workflow_run_success"
 	featureDiscussions        = "discussions"
 	featureDiscussionComments = "discussion_comments"
 )
@@ -59,6 +61,8 @@ var validFeatures = map[string]bool{
 	featureReleases:           true,
 	featureWorkflowFailure:    true,
 	featureWorkflowSuccess:    true,
+	featureWorkflowRunFailure: true,
+	featureWorkflowRunSuccess: true,
 	featureDiscussions:        true,
 	featureDiscussionComments: true,
 }
@@ -374,7 +378,7 @@ func (p *Plugin) createPost(channelID, userID, message string) error {
 	}
 
 	if err := p.client.Post.CreatePost(post); err != nil {
-		p.client.Log.Warn("Error while creating post", "post", post, "error", err.Error())
+		p.client.Log.Warn("Error while creating post", "channel_id", post.ChannelId, "error", err.Error())
 		return err
 	}
 
@@ -1033,7 +1037,7 @@ func (p *Plugin) ExecuteCommand(c *plugin.Context, args *model.CommandArgs) (*mo
 		qparams := ""
 		if privateAllowed {
 			if !p.getConfiguration().EnablePrivateRepo {
-				p.postCommandResponse(args, "Private repositories are disabled. Please ask a System Admin to enabled them.")
+				p.postCommandResponse(args, "Private repositories are disabled. Please ask a System Admin to enable them.")
 				return &model.CommandResponse{}, nil
 			}
 			qparams = "?private=true"
@@ -1041,6 +1045,12 @@ func (p *Plugin) ExecuteCommand(c *plugin.Context, args *model.CommandArgs) (*mo
 
 		msg := fmt.Sprintf("[Click here to link your Forgejo account.](%s%s)", connectURL, qparams)
 		p.postCommandResponse(args, msg)
+		return &model.CommandResponse{}, nil
+	}
+
+	if action == "disconnect" {
+		p.disconnectGitHubAccount(args.UserId)
+		p.postCommandResponse(args, "Disconnected your GitHub account.")
 		return &model.CommandResponse{}, nil
 	}
 
@@ -1109,7 +1119,7 @@ func getAutocompleteData(config *Configuration) *model.AutocompleteData {
 
 	subscriptionsAdd := model.NewAutocompleteData("add", "[owner/repo] [features] [flags]", "Subscribe the current channel to receive notifications about opened pull requests and issues for an organization or repository. [features] and [flags] are optional arguments")
 	subscriptionsAdd.AddTextArgument("Owner/repo to subscribe to", "[owner/repo]", "")
-	subscriptionsAdd.AddNamedTextArgument("features", "Comma-delimited list of one or more of: issues, pulls, pulls_merged, pulls_created, pushes, creates, deletes, issue_creations, issue_comments, pull_reviews, releases, workflow_success, workflow_failure, discussions, discussion_comments, label:\"<labelname>\". Defaults to pulls,issues,creates,deletes", "", `/[^,-\s]+(,[^,-\s]+)*/`, false)
+	subscriptionsAdd.AddNamedTextArgument("features", "Comma-delimited list of one or more of: issues, pulls, pulls_merged, pulls_created, pushes, creates, deletes, issue_creations, issue_comments, pull_reviews, releases, workflow_success, workflow_failure, workflow_run_failure, workflow_run_success, discussions, discussion_comments, label:\"<labelname>\". Defaults to pulls,issues,creates,deletes", "", `/[^,-\s]+(,[^,-\s]+)*/`, false)
 
 	if config.ForgejoOrg != "" {
 		subscriptionsAdd.AddNamedStaticListArgument("exclude-org-member", "Events triggered by organization members will not be delivered (the organization config should be set, otherwise this flag has not effect)", false, []model.AutocompleteListItem{

@@ -41,6 +41,10 @@ type Configuration struct {
 	EnableWebhookEventLogging      bool   `json:"enablewebhookeventlogging"`
 	ShowAuthorInCommitNotification bool   `json:"showauthorincommitnotification"`
 	GetNotificationForDraftPRs     bool   `json:"getnotificationfordraftprs"`
+	// ReviewTargetDays is the number of calendar days from PR open until a review is "due" (0 = SLA disabled).
+	ReviewTargetDays int `json:"reviewtargetdays"`
+	// OverdueReviewsChannelID is an optional channel ID for daily alerts when users have overdue review requests.
+	OverdueReviewsChannelID string `json:"overduereviewschannelid"`
 }
 
 func (c *Configuration) ToMap() (map[string]any, error) {
@@ -94,6 +98,10 @@ func (c *Configuration) getBaseURL() string {
 func (c *Configuration) sanitize() {
 	c.BaseURL = strings.TrimRight(c.BaseURL, "/")
 	c.UploadURL = strings.TrimRight(c.UploadURL, "/")
+	c.OverdueReviewsChannelID = strings.TrimSpace(c.OverdueReviewsChannelID)
+	if c.ReviewTargetDays < 0 {
+		c.ReviewTargetDays = 0
+	}
 
 	// Trim spaces around org and OAuth credentials
 	c.ForgejoOrg = strings.TrimSpace(c.ForgejoOrg)
@@ -113,6 +121,7 @@ func (c *Configuration) IsSASS() bool {
 func (c *Configuration) ClientConfiguration() map[string]any {
 	return map[string]any{
 		"left_sidebar_enabled": c.EnableLeftSidebar,
+		"review_target_days":   c.ReviewTargetDays,
 	}
 }
 
@@ -194,7 +203,15 @@ func (p *Plugin) OnConfigurationChange() error {
 
 	configuration.sanitize()
 
-	p.sendWebsocketEventIfNeeded(p.getConfiguration(), configuration)
+	previousConfig := p.getConfiguration()
+	previousEncryptionKey := previousConfig.EncryptionKey
+
+	p.sendWebsocketEventIfNeeded(previousConfig, configuration)
+
+	if previousEncryptionKey != "" && configuration.EncryptionKey != "" &&
+		previousEncryptionKey != configuration.EncryptionKey {
+		go p.reEncryptUserData(configuration.EncryptionKey, previousEncryptionKey)
+	}
 
 	p.setConfiguration(configuration)
 
