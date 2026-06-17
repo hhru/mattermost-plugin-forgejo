@@ -54,6 +54,7 @@ const (
 )
 
 var eventTypeMapping = map[string]any{
+	"issues":                &FIssuesEvent{},
 	"issue_comment":         &FIssueCommentEvent{},
 	"pull_request":          &FPullRequestEvent{},
 	"pull_request_comment":  &FPullRequestReviewCommentEvent{},
@@ -274,11 +275,14 @@ func (p *Plugin) handleWebhook(w http.ResponseWriter, r *http.Request) {
 			p.handlePullRequestNotification(event)
 			p.handlePRDescriptionMentionNotification(event)
 		}
-	case *github.IssuesEvent:
-		repo = event.GetRepo()
+	case *FIssuesEvent:
+		// Forgejo's issues payload is not go-github compatible, so it is parsed
+		// into Forgejo-native types and converted before reusing the shared logic.
+		githubIssuesEvent := event.toGitHubIssuesEvent()
+		repo = githubIssuesEvent.GetRepo()
 		handler = func() {
-			p.postIssueEvent(event)
-			p.handleIssueNotification(event)
+			p.postIssueEvent(githubIssuesEvent)
+			p.handleIssueNotification(githubIssuesEvent)
 		}
 	case *FIssueCommentEvent:
 		repo = &github.Repository{

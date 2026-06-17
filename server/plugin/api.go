@@ -133,6 +133,7 @@ type FIssue struct {
 	Number     *int             `json:"number,omitempty"`
 	Repository *FRepositoryMeta `json:"repository,omitempty"`
 	Title      *string          `json:"title,omitempty"`
+	Body       *string          `json:"body,omitempty"`
 	CreatedAt  *FTimestamp      `json:"created_at,omitempty"`
 	UpdatedAt  *FTimestamp      `json:"updated_at,omitempty"`
 	User       *FUser           `json:"user,omitempty"`
@@ -154,6 +155,96 @@ type FIssueComment struct {
 	ID      *int    `json:"id,omitempty"`
 	Body    *string `json:"body,omitempty"`
 	HTMLURL *string `json:"html_url,omitempty"`
+}
+
+// FIssuesEvent is the Forgejo "issues" webhook payload. Forgejo's payload is not
+// compatible with go-github's IssuesEvent (notably issue.repository.owner is a
+// string, not an object), so it is parsed into Forgejo-native types and then
+// converted to *github.IssuesEvent to reuse the existing post/notification logic.
+type FIssuesEvent struct {
+	Action *string      `json:"action,omitempty"`
+	Number *int         `json:"number,omitempty"`
+	Issue  *FIssue      `json:"issue,omitempty"`
+	Repo   *FRepository `json:"repository,omitempty"`
+	Sender *FUser       `json:"sender,omitempty"`
+	Label  *FLabel      `json:"label,omitempty"`
+}
+
+func (e *FIssuesEvent) GetSender() *FUser {
+	if e == nil {
+		return nil
+	}
+	return e.Sender
+}
+
+func fUserToGitHub(u *FUser) *github.User {
+	if u == nil {
+		return nil
+	}
+	return &github.User{Login: u.Login, HTMLURL: u.HTMLURL}
+}
+
+func fUsersToGitHub(users []*FUser) []*github.User {
+	if users == nil {
+		return nil
+	}
+	result := make([]*github.User, 0, len(users))
+	for _, u := range users {
+		result = append(result, fUserToGitHub(u))
+	}
+	return result
+}
+
+// toGitHubIssuesEvent converts the Forgejo-native event into the go-github shape
+// expected by postIssueEvent/handleIssueNotification and the issue templates.
+func (e *FIssuesEvent) toGitHubIssuesEvent() *github.IssuesEvent {
+	if e == nil {
+		return nil
+	}
+
+	var repo *github.Repository
+	if e.Repo != nil {
+		repo = &github.Repository{
+			FullName: e.Repo.FullName,
+			HTMLURL:  e.Repo.HTMLURL,
+			Private:  e.Repo.Private,
+		}
+	}
+
+	var issue *github.Issue
+	if e.Issue != nil {
+		issue = &github.Issue{
+			Number:    e.Issue.Number,
+			Title:     e.Issue.Title,
+			Body:      e.Issue.Body,
+			HTMLURL:   e.Issue.HTMLURL,
+			User:      fUserToGitHub(e.Issue.User),
+			Assignees: fUsersToGitHub(e.Issue.Assignees),
+			Labels:    getGithubLabels(e.Issue.Labels),
+		}
+		if e.Issue.CreatedAt != nil {
+			issue.CreatedAt = &github.Timestamp{Time: e.Issue.CreatedAt.Time}
+		}
+		if e.Issue.UpdatedAt != nil {
+			issue.UpdatedAt = &github.Timestamp{Time: e.Issue.UpdatedAt.Time}
+		}
+		if e.Issue.Milestone != nil {
+			issue.Milestone = &github.Milestone{Title: e.Issue.Milestone.Title}
+		}
+	}
+
+	var label *github.Label
+	if e.Label != nil {
+		label = &github.Label{Name: e.Label.Name, Color: e.Label.Color}
+	}
+
+	return &github.IssuesEvent{
+		Action: e.Action,
+		Issue:  issue,
+		Repo:   repo,
+		Sender: fUserToGitHub(e.Sender),
+		Label:  label,
+	}
 }
 
 type FPullRequestReviewCommentEvent struct {
