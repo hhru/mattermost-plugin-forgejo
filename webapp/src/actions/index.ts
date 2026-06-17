@@ -18,7 +18,7 @@ import ActionTypes from '../action_types';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const isAPIError = (data: any): data is APIError => {
-    return 'status_code' in data && Boolean((data as APIError).status_code);
+    return Boolean(data) && typeof data === 'object' && 'status_code' in data && Boolean((data as APIError).status_code);
 };
 
 export function getConnected(reminder = false) {
