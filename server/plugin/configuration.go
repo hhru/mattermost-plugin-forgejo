@@ -87,12 +87,16 @@ func (c *Configuration) setDefaults(isCloud bool) (bool, error) {
 	return changed, nil
 }
 
+// defaultBaseURL is the fallback Forgejo instance URL used when no BaseURL is
+// configured. It is the single source of truth for the default host.
+const defaultBaseURL = "https://forgejo.pyn.ru"
+
 func (c *Configuration) getBaseURL() string {
 	if c.BaseURL != "" {
 		return c.BaseURL + "/"
 	}
 
-	return "https://forgejo.pyn.ru/"
+	return defaultBaseURL + "/"
 }
 
 func (c *Configuration) sanitize() {
@@ -214,6 +218,9 @@ func (p *Plugin) OnConfigurationChange() error {
 	}
 
 	p.setConfiguration(configuration)
+
+	// Rebuild the permalink regex so code preview matches the configured host.
+	p.forgejoPermalinkRegex = buildForgejoPermalinkRegex(configuration.BaseURL)
 
 	command, err := p.getCommand(configuration)
 	if err != nil {

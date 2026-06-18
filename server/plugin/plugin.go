@@ -96,10 +96,31 @@ type Plugin struct {
 	emojiMap map[string]string
 }
 
+// buildForgejoPermalinkRegex compiles the regex used to detect Forgejo file
+// permalinks in messages. Forgejo permalinks use the /src/{commit,branch,tag}/
+// path format (not GitHub's /blob/), and the host is derived from the
+// configured BaseURL so the feature works on any instance.
+func buildForgejoPermalinkRegex(baseURL string) *regexp.Regexp {
+	if baseURL == "" {
+		baseURL = defaultBaseURL
+	}
+	host := baseURL
+	if u, err := url.Parse(baseURL); err == nil && u.Host != "" {
+		host = u.Host
+	}
+	host = strings.TrimPrefix(host, "www.")
+
+	pattern := fmt.Sprintf(
+		`https?://(?P<haswww>www\.)?%s/(?P<user>[\w-]+)/(?P<repo>[\w-.]+)/src/(?:commit|branch|tag)/(?P<commit>[\w.-]+)/(?P<path>[\w-/.]+)#(?P<line>[\w-]+)?`,
+		regexp.QuoteMeta(host),
+	)
+	return regexp.MustCompile(pattern)
+}
+
 // NewPlugin returns an instance of a Plugin.
 func NewPlugin() *Plugin {
 	p := &Plugin{
-		forgejoPermalinkRegex: regexp.MustCompile(`https?://(?P<haswww>www\.)?forgejo\.pyn\.ru/(?P<user>[\w-]+)/(?P<repo>[\w-.]+)/blob/(?P<commit>[\w-]+)/(?P<path>[\w-/.]+)#(?P<line>[\w-]+)?`),
+		forgejoPermalinkRegex: buildForgejoPermalinkRegex(""),
 	}
 
 	p.CommandHandlers = map[string]CommandHandleFunc{
