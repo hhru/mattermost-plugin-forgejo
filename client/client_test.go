@@ -1,3 +1,6 @@
+// Copyright (c) 2018-present Mattermost, Inc. All Rights Reserved.
+// See LICENSE.txt for license information.
+
 package client
 
 import (
@@ -21,7 +24,7 @@ import (
 func TestRoundTripper(t *testing.T) {
 	t.Run("Valid response", func(t *testing.T) {
 		pluginAPI := &plugintest.API{}
-		pluginAPI.On("PluginHTTP", mock.AnythingOfType("*http.Request")).Return(&http.Response{StatusCode: http.StatusOK})
+		pluginAPI.On("PluginHTTP", mock.AnythingOfType("*http.Request")).Return(&http.Response{StatusCode: http.StatusOK, Body: http.NoBody})
 
 		roundTripper := pluginAPIRoundTripper{api: pluginAPI}
 		req, err := http.NewRequest(http.MethodPost, "url", nil)
@@ -29,6 +32,7 @@ func TestRoundTripper(t *testing.T) {
 
 		resp, err := roundTripper.RoundTrip(req)
 		require.NoError(t, err)
+		defer func() { _ = resp.Body.Close() }()
 		require.Equal(t, http.StatusOK, resp.StatusCode)
 	})
 
@@ -42,6 +46,9 @@ func TestRoundTripper(t *testing.T) {
 		require.NoError(t, err)
 
 		resp, err := roundTripper.RoundTrip(req)
+		if resp != nil && resp.Body != nil {
+			defer func() { _ = resp.Body.Close() }()
+		}
 		require.Nil(t, resp)
 		require.Error(t, err)
 	})

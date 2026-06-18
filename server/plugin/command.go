@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"unicode"
 
 	"github.com/google/go-github/v54/github"
 	"github.com/pkg/errors"
+	"golang.org/x/oauth2"
 
 	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/mattermost/mattermost/server/public/plugin"
@@ -30,6 +32,8 @@ const (
 	featureReleases           = "releases"
 	featureWorkflowFailure    = "workflow_failure"
 	featureWorkflowSuccess    = "workflow_success"
+	featureWorkflowRunFailure = "workflow_run_failure"
+	featureWorkflowRunSuccess = "workflow_run_success"
 	featureDiscussions        = "discussions"
 	featureDiscussionComments = "discussion_comments"
 )
@@ -37,6 +41,10 @@ const (
 const (
 	PerPageValue = 50
 )
+
+var ErrNotFound = errors.New("forgejo user not found")
+
+const DefaultRepoKey string = "%s_%s-default-repo"
 
 var validFeatures = map[string]bool{
 	featureIssueCreation:      true,
@@ -53,6 +61,8 @@ var validFeatures = map[string]bool{
 	featureReleases:           true,
 	featureWorkflowFailure:    true,
 	featureWorkflowSuccess:    true,
+	featureWorkflowRunFailure: true,
+	featureWorkflowRunSuccess: true,
 	featureDiscussions:        true,
 	featureDiscussionComments: true,
 }
@@ -103,13 +113,13 @@ func validateFeatures(features []string) (bool, []string) {
 // checkFeatureConflict returns false when given features
 // cannot be added together along with a list of the conflicting features.
 func checkFeatureConflict(fs []string) (bool, []string) {
-	if SliceContainsString(fs, featureIssues) && SliceContainsString(fs, featureIssueCreation) {
+	if slices.Contains(fs, featureIssues) && slices.Contains(fs, featureIssueCreation) {
 		return false, []string{featureIssues, featureIssueCreation}
 	}
-	if SliceContainsString(fs, featurePulls) && SliceContainsString(fs, featurePullsMerged) {
+	if slices.Contains(fs, featurePulls) && slices.Contains(fs, featurePullsMerged) {
 		return false, []string{featurePulls, featurePullsMerged}
 	}
-	if SliceContainsString(fs, featurePulls) && SliceContainsString(fs, featurePullsCreated) {
+	if slices.Contains(fs, featurePulls) && slices.Contains(fs, featurePullsCreated) {
 		return false, []string{featurePulls, featurePullsCreated}
 	}
 	return true, nil
@@ -168,22 +178,48 @@ func (p *Plugin) handleMuteList(_ *model.CommandArgs, userInfo *ForgejoUserInfo)
 	return "Your muted users:\n" + mutedUsers
 }
 
-func contains(s []string, e string) bool {
-	for _, a := range s {
-		if a == e {
-			return true
+func (p *Plugin) isValidGitHubUsername(username string, userInfo *ForgejoUserInfo) (bool, error) {
+	githubClient := p.githubConnectUser(context.Background(), userInfo)
+
+	if cErr := p.useGitHubClient(userInfo, func(userInfo *ForgejoUserInfo, token *oauth2.Token) error {
+		ghUser, _, err := githubClient.Users.Get(context.Background(), username)
+		if err != nil {
+			if gErr, ok := err.(*github.ErrorResponse); ok && gErr.Response.StatusCode == http.StatusNotFound {
+				return ErrNotFound
+			}
+
+			return err
 		}
+
+		if ghUser == nil {
+			return ErrNotFound
+		}
+
+		return nil
+	}); cErr != nil {
+		if errors.Is(cErr, ErrNotFound) {
+			return false, nil
+		}
+
+		p.client.Log.Warn("Failed to fetch user", "error", cErr.Error())
+		return false, errors.New("Failed to fetch user")
 	}
-	return false
+
+	return true, nil
 }
 
 func (p *Plugin) handleMuteAdd(_ *model.CommandArgs, username string, userInfo *ForgejoUserInfo) string {
 	mutedUsernames := p.getMutedUsernames(userInfo)
-	if contains(mutedUsernames, username) {
+	if slices.Contains(mutedUsernames, username) {
 		return username + " is already muted"
 	}
 
-	if strings.Contains(username, ",") {
+	isValidUsername, err := p.isValidGitHubUsername(username, userInfo)
+	if err != nil {
+		return "Error occurred validating username"
+	}
+
+	if strings.Contains(username, ",") || !isValidUsername {
 		return "Invalid username provided"
 	}
 
@@ -195,7 +231,7 @@ func (p *Plugin) handleMuteAdd(_ *model.CommandArgs, username string, userInfo *
 		mutedUsers = username
 	}
 
-	_, err := p.store.Set(userInfo.UserID+"-muted-users", []byte(mutedUsers))
+	_, err = p.store.Set(userInfo.UserID+"-muted-users", []byte(mutedUsers))
 	if err != nil {
 		return "Error occurred saving list of muted users"
 	}
@@ -206,7 +242,10 @@ func (p *Plugin) handleMuteAdd(_ *model.CommandArgs, username string, userInfo *
 func (p *Plugin) handleUnmute(_ *model.CommandArgs, username string, userInfo *ForgejoUserInfo) string {
 	mutedUsernames := p.getMutedUsernames(userInfo)
 	userToMute := []string{username}
-	newMutedList := arrayDifference(mutedUsernames, userToMute)
+	newMutedList, removed := arrayDifference(mutedUsernames, userToMute)
+	if !removed {
+		return username + " is not muted"
+	}
 
 	_, err := p.store.Set(userInfo.UserID+"-muted-users", []byte(strings.Join(newMutedList, ",")))
 	if err != nil {
@@ -217,6 +256,11 @@ func (p *Plugin) handleUnmute(_ *model.CommandArgs, username string, userInfo *F
 }
 
 func (p *Plugin) handleUnmuteAll(_ *model.CommandArgs, userInfo *ForgejoUserInfo) string {
+	mutedUsernames := p.getMutedUsernames(userInfo)
+	if len(mutedUsernames) == 0 {
+		return "You have no muted users"
+	}
+
 	_, err := p.store.Set(userInfo.UserID+"-muted-users", []byte(""))
 	if err != nil {
 		return "Error occurred unmuting users"
@@ -232,20 +276,20 @@ func (p *Plugin) handleMuteCommand(_ *plugin.Context, args *model.CommandArgs, p
 
 	command := parameters[0]
 
-	switch {
-	case command == "list":
+	switch command {
+	case "list":
 		return p.handleMuteList(args, userInfo)
-	case command == "add":
+	case "add":
 		if len(parameters) != 2 {
 			return "Invalid number of parameters supplied to " + command
 		}
 		return p.handleMuteAdd(args, parameters[1], userInfo)
-	case command == "delete":
+	case "delete":
 		if len(parameters) != 2 {
 			return "Invalid number of parameters supplied to " + command
 		}
 		return p.handleUnmute(args, parameters[1], userInfo)
-	case command == "delete-all":
+	case "delete-all":
 		return p.handleUnmuteAll(args, userInfo)
 	default:
 		return fmt.Sprintf("Unknown subcommand %v", command)
@@ -253,18 +297,22 @@ func (p *Plugin) handleMuteCommand(_ *plugin.Context, args *model.CommandArgs, p
 }
 
 // Returns the elements in a, that are not in b
-func arrayDifference(a, b []string) []string {
+func arrayDifference(a, b []string) ([]string, bool) {
 	mb := make(map[string]struct{}, len(b))
 	for _, x := range b {
 		mb[x] = struct{}{}
 	}
+
 	var diff []string
+	removed := false
 	for _, x := range a {
 		if _, found := mb[x]; !found {
 			diff = append(diff, x)
+		} else {
+			removed = true
 		}
 	}
-	return diff
+	return diff, removed
 }
 
 func (p *Plugin) handleSubscribe(c *plugin.Context, args *model.CommandArgs, parameters []string, userInfo *ForgejoUserInfo) string {
@@ -286,12 +334,12 @@ func (p *Plugin) handleSubscriptions(c *plugin.Context, args *model.CommandArgs,
 	command := parameters[0]
 	parameters = parameters[1:]
 
-	switch {
-	case command == "list":
+	switch command {
+	case "list":
 		return p.handleSubscriptionsList(c, args, parameters, userInfo)
-	case command == "add":
+	case "add":
 		return p.handleSubscribesAdd(c, args, parameters, userInfo)
-	case command == "delete":
+	case "delete":
 		return p.handleUnsubscribe(c, args, parameters, userInfo)
 	default:
 		return fmt.Sprintf("Unknown subcommand %v", command)
@@ -330,7 +378,7 @@ func (p *Plugin) createPost(channelID, userID, message string) error {
 	}
 
 	if err := p.client.Post.CreatePost(post); err != nil {
-		p.client.Log.Warn("Error while creating post", "post", post, "error", err.Error())
+		p.client.Log.Warn("Error while creating post", "channel_id", post.ChannelId, "error", err.Error())
 		return err
 	}
 
@@ -551,6 +599,7 @@ func (p *Plugin) getSubscribedFeatures(channelID, owner, repo string) (Features,
 
 	return previousFeatures, nil
 }
+
 func (p *Plugin) handleUnsubscribe(_ *plugin.Context, args *model.CommandArgs, parameters []string, _ *ForgejoUserInfo) string {
 	if len(parameters) == 0 {
 		return "Please specify a repository."
@@ -565,8 +614,12 @@ func (p *Plugin) handleUnsubscribe(_ *plugin.Context, args *model.CommandArgs, p
 
 	owner = strings.ToLower(owner)
 	repo = strings.ToLower(repo)
-	if err := p.Unsubscribe(args.ChannelId, repo, owner); err != nil {
-		p.client.Log.Warn("Failed to unsubscribe", "repo", repo, "error", err.Error())
+	if sErr := p.Unsubscribe(args.ChannelId, repo, owner); sErr != nil {
+		if sErr.Code == SubscriptionNotFound {
+			return sErr.Error.Error()
+		}
+
+		p.client.Log.Warn("Failed to unsubscribe", "repo", repo, "error", sErr.Error.Error())
 		return "Encountered an error trying to unsubscribe. Please try again."
 	}
 
@@ -727,13 +780,131 @@ func (p *Plugin) handleIssue(_ *plugin.Context, args *model.CommandArgs, paramet
 	command := parameters[0]
 	parameters = parameters[1:]
 
-	switch {
-	case command == "create":
+	switch command {
+	case "create":
 		p.openIssueCreateModal(args.UserId, args.ChannelId, strings.Join(parameters, " "))
 		return ""
 	default:
 		return fmt.Sprintf("Unknown subcommand %v", command)
 	}
+}
+
+func (p *Plugin) handleDefaultRepo(c *plugin.Context, args *model.CommandArgs, parameters []string, userInfo *ForgejoUserInfo) string {
+	if len(parameters) == 0 {
+		return "Invalid action. Available actions are 'set', 'get' and 'unset'."
+	}
+
+	command := parameters[0]
+	parameters = parameters[1:]
+
+	switch command {
+	case "set":
+		return p.handleSetDefaultRepo(args, parameters, userInfo)
+	case "get":
+		return p.handleGetDefaultRepo(args, userInfo)
+	case "unset":
+		return p.handleUnSetDefaultRepo(args, userInfo)
+	default:
+		return fmt.Sprintf("Unknown subcommand %v", command)
+	}
+}
+
+func (p *Plugin) handleSetDefaultRepo(args *model.CommandArgs, parameters []string, userInfo *ForgejoUserInfo) string {
+	if len(parameters) == 0 {
+		return "Please specify a repository."
+	}
+
+	repo := parameters[0]
+	config := p.getConfiguration()
+	baseURL := config.getBaseURL()
+	owner, repo := parseOwnerAndRepo(repo, baseURL)
+	if owner == "" || repo == "" {
+		return "Please provide a valid repository"
+	}
+
+	owner = strings.ToLower(owner)
+	repo = strings.ToLower(repo)
+
+	if config.ForgejoOrg != "" && !p.isOrgInLockedOrgs(config.ForgejoOrg, owner) {
+		return fmt.Sprintf("Repository is not part of the locked Forgejo organization. Locked Forgejo organizations: %s", config.ForgejoOrg)
+	}
+
+	ctx := context.Background()
+	githubClient := p.githubConnectUser(ctx, userInfo)
+
+	ghRepo, _, err := githubClient.Repositories.Get(ctx, owner, repo)
+	if err != nil {
+		return "Error occurred while getting Forgejo repository details"
+	}
+	if ghRepo == nil {
+		return fmt.Sprintf("Unknown repository %s", fullNameFromOwnerAndRepo(owner, repo))
+	}
+
+	if _, err := p.store.Set(fmt.Sprintf(DefaultRepoKey, args.ChannelId, userInfo.UserID), fmt.Appendf(nil, "%s/%s", owner, repo)); err != nil {
+		return "Error occurred saving the default repo"
+	}
+
+	repoLink := fmt.Sprintf("%s%s/%s", baseURL, owner, repo)
+	successMsg := fmt.Sprintf("The default repo has been set to [%s/%s](%s) for this channel", owner, repo, repoLink)
+
+	return successMsg
+}
+
+func (p *Plugin) GetDefaultRepo(userID, channelID string) (string, error) {
+	var defaultRepoBytes []byte
+	if err := p.store.Get(fmt.Sprintf(DefaultRepoKey, channelID, userID), &defaultRepoBytes); err != nil {
+		return "", err
+	}
+
+	return string(defaultRepoBytes), nil
+}
+
+func (p *Plugin) handleGetDefaultRepo(args *model.CommandArgs, userInfo *ForgejoUserInfo) string {
+	defaultRepo, err := p.GetDefaultRepo(userInfo.UserID, args.ChannelId)
+	if err != nil {
+		p.client.Log.Warn("Not able to get the default repo", "UserID", userInfo.UserID, "ChannelID", args.ChannelId, "Error", err.Error())
+		return "Error occurred while getting the default repo"
+	}
+
+	if defaultRepo == "" {
+		return "You have not set a default repository for this channel"
+	}
+
+	config := p.getConfiguration()
+	repoLink := config.getBaseURL() + defaultRepo
+	return fmt.Sprintf("The default repository is [%s](%s)", defaultRepo, repoLink)
+}
+
+func (p *Plugin) handleUnSetDefaultRepo(args *model.CommandArgs, userInfo *ForgejoUserInfo) string {
+	defaultRepo, err := p.GetDefaultRepo(userInfo.UserID, args.ChannelId)
+	if err != nil {
+		p.client.Log.Warn("Not able to get the default repo", "UserID", userInfo.UserID, "ChannelID", args.ChannelId, "Error", err.Error())
+		return "Error occurred while getting the default repo"
+	}
+
+	if defaultRepo == "" {
+		return "You have not set a default repository for this channel"
+	}
+
+	if err := p.store.Delete(fmt.Sprintf(DefaultRepoKey, args.ChannelId, userInfo.UserID)); err != nil {
+		return "Error occurred while unsetting the repo for this channel"
+	}
+
+	return "The default repository has been unset successfully"
+}
+
+func (p *Plugin) isOrgInLockedOrgs(configuredOrgs, owner string) bool {
+	if configuredOrgs == "" {
+		return true
+	}
+
+	for org := range strings.SplitSeq(configuredOrgs, ",") {
+		if strings.EqualFold(strings.TrimSpace(org), strings.TrimSpace(owner)) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (p *Plugin) handleSetup(_ *plugin.Context, args *model.CommandArgs, parameters []string) string {
@@ -754,12 +925,12 @@ func (p *Plugin) handleSetup(_ *plugin.Context, args *model.CommandArgs, paramet
 	} else {
 		command := parameters[0]
 
-		switch {
-		case command == "oauth":
+		switch command {
+		case "oauth":
 			err = p.flowManager.StartOauthWizard(userID)
-		case command == "webhook":
+		case "webhook":
 			err = p.flowManager.StartWebhookWizard(userID)
-		case command == "announcement":
+		case "announcement":
 			err = p.flowManager.StartAnnouncementWizard(userID)
 		default:
 			return fmt.Sprintf("Unknown subcommand %v", command)
@@ -814,6 +985,14 @@ func (p *Plugin) ExecuteCommand(c *plugin.Context, args *model.CommandArgs) (*mo
 		return &model.CommandResponse{}, nil
 	}
 
+	if action == "help" {
+		message := p.handleHelp(c, args, parameters, nil)
+		if message != "" {
+			p.postCommandResponse(args, message)
+		}
+		return &model.CommandResponse{}, nil
+	}
+
 	config := p.getConfiguration()
 
 	if validationErr := config.IsValid(); validationErr != nil {
@@ -858,7 +1037,7 @@ func (p *Plugin) ExecuteCommand(c *plugin.Context, args *model.CommandArgs) (*mo
 		qparams := ""
 		if privateAllowed {
 			if !p.getConfiguration().EnablePrivateRepo {
-				p.postCommandResponse(args, "Private repositories are disabled. Please ask a System Admin to enabled them.")
+				p.postCommandResponse(args, "Private repositories are disabled. Please ask a System Admin to enable them.")
 				return &model.CommandResponse{}, nil
 			}
 			qparams = "?private=true"
@@ -866,6 +1045,12 @@ func (p *Plugin) ExecuteCommand(c *plugin.Context, args *model.CommandArgs) (*mo
 
 		msg := fmt.Sprintf("[Click here to link your Forgejo account.](%s%s)", connectURL, qparams)
 		p.postCommandResponse(args, msg)
+		return &model.CommandResponse{}, nil
+	}
+
+	if action == "disconnect" {
+		p.disconnectGitHubAccount(args.UserId)
+		p.postCommandResponse(args, "Disconnected your GitHub account.")
 		return &model.CommandResponse{}, nil
 	}
 
@@ -902,10 +1087,13 @@ func getAutocompleteData(config *Configuration) *model.AutocompleteData {
 		about := command.BuildInfoAutocomplete("about")
 		forgejo.AddCommand(about)
 
+		help := model.NewAutocompleteData("help", "", "Display Slash Command help text")
+		forgejo.AddCommand(help)
+
 		return forgejo
 	}
 
-	forgejo := model.NewAutocompleteData("forgejo", "[command]", "Available commands: connect, disconnect, todo, subscriptions, issue, me, mute, settings, help, about")
+	forgejo := model.NewAutocompleteData("forgejo", "[command]", "Available commands: connect, disconnect, todo, subscriptions, issue, default-repo, me, mute, settings, help, about")
 
 	connect := model.NewAutocompleteData("connect", "", "Connect your Mattermost account to your Forgejo account")
 	if config.EnablePrivateRepo {
@@ -931,7 +1119,7 @@ func getAutocompleteData(config *Configuration) *model.AutocompleteData {
 
 	subscriptionsAdd := model.NewAutocompleteData("add", "[owner/repo] [features] [flags]", "Subscribe the current channel to receive notifications about opened pull requests and issues for an organization or repository. [features] and [flags] are optional arguments")
 	subscriptionsAdd.AddTextArgument("Owner/repo to subscribe to", "[owner/repo]", "")
-	subscriptionsAdd.AddNamedTextArgument("features", "Comma-delimited list of one or more of: issues, pulls, pulls_merged, pulls_created, pushes, creates, deletes, issue_creations, issue_comments, pull_reviews, releases, workflow_success, workflow_failure, discussions, discussion_comments, label:\"<labelname>\". Defaults to pulls,issues,creates,deletes", "", `/[^,-\s]+(,[^,-\s]+)*/`, false)
+	subscriptionsAdd.AddNamedTextArgument("features", "Comma-delimited list of one or more of: issues, pulls, pulls_merged, pulls_created, pushes, creates, deletes, issue_creations, issue_comments, pull_reviews, releases, workflow_success, workflow_failure, workflow_run_failure, workflow_run_success, discussions, discussion_comments, label:\"<labelname>\". Defaults to pulls,issues,creates,deletes", "", `/[^,-\s]+(,[^,-\s]+)*/`, false)
 
 	if config.ForgejoOrg != "" {
 		subscriptionsAdd.AddNamedStaticListArgument("exclude-org-member", "Events triggered by organization members will not be delivered (the organization config should be set, otherwise this flag has not effect)", false, []model.AutocompleteListItem{
@@ -977,6 +1165,20 @@ func getAutocompleteData(config *Configuration) *model.AutocompleteData {
 	issue.AddCommand(issueCreate)
 
 	forgejo.AddCommand(issue)
+
+	defaultRepo := model.NewAutocompleteData("default-repo", "[command]", "Available commands: set, get, unset")
+	defaultRepoSet := model.NewAutocompleteData("set", "[owner/repo]", "Set the default repository for the channel")
+	defaultRepoSet.AddTextArgument("Owner/repo to set as a default repository", "[owner/repo]", "")
+
+	defaultRepoGet := model.NewAutocompleteData("get", "", "Get the default repository already set for the channel")
+
+	defaultRepoDelete := model.NewAutocompleteData("unset", "", "Unset the default repository set for the channel")
+
+	defaultRepo.AddCommand(defaultRepoSet)
+	defaultRepo.AddCommand(defaultRepoGet)
+	defaultRepo.AddCommand(defaultRepoDelete)
+
+	forgejo.AddCommand(defaultRepo)
 
 	me := model.NewAutocompleteData("me", "", "Display the connected Forgejo account")
 	forgejo.AddCommand(me)
@@ -1105,15 +1307,6 @@ func parseCommand(input string) (command, action string, parameters []string) {
 	}
 
 	return command, action, parameters
-}
-
-func SliceContainsString(a []string, x string) bool {
-	for _, n := range a {
-		if x == n {
-			return true
-		}
-	}
-	return false
 }
 
 // processTeamNotificationsExcludeFlag processes the exclude flag for team notifications

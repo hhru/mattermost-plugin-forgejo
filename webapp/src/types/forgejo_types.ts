@@ -1,6 +1,9 @@
+// Copyright (c) 2018-present Mattermost, Inc. All Rights Reserved.
+// See LICENSE.txt for license information.
+
 import * as CSS from 'csstype';
 
-import {Theme} from 'mattermost-redux/types/preferences';
+import {Theme} from 'mattermost-redux/selectors/entities/preferences';
 
 export type ForgejoLabel = {
     id: number;
@@ -21,6 +24,9 @@ export type ForgejoItem = PrsDetailsData & {
     id: number;
     title: string;
     created_at: string;
+
+    /** When set, instant used for review SLA (review request time if plugin recorded it). */
+    review_sla_start?: string;
     updated_at: string;
     html_url: string;
     repository_url?: string;
@@ -50,6 +56,12 @@ export type ForgejoItem = PrsDetailsData & {
 export type ForgejoItemsProps = {
     items: ForgejoItem[];
     theme: Theme;
+
+    /** When true, render an SLA-status badge (Overdue / Due today / Due in N days) next to each item. */
+    showReviewSLA?: boolean;
+
+    /** SLA target in days, used to compute the badge. Falsy disables the badge regardless of showReviewSLA. */
+    reviewTargetDays?: number;
 }
 
 export type UserSettingsData = {
@@ -70,6 +82,7 @@ export type ConnectedData = {
 
 export type ConfigurationData = {
     left_sidebar_enabled: boolean;
+    review_target_days?: number;
 }
 
 export type PrsDetailsData = {
@@ -89,6 +102,7 @@ export type ForgejoIssueData = {
 export type YourReposData = {
     name: string;
     full_name: string;
+    permissions: Record<string, boolean>;
 }
 
 export type UnreadsData = {
@@ -107,8 +121,21 @@ export type MentionsData = {
 }
 
 export type ForgejoUsersData = {
-    username: string;
+    username?: string;
     last_try: number;
+}
+
+export type GitHubPullRequestData = {
+    id: number;
+}
+
+export type MilestoneData = {
+    number: number;
+    title: string;
+}
+
+export type GitHubIssueCommentData = {
+    id: number;
 }
 
 export type ShowRhsPluginActionData = {
@@ -140,5 +167,25 @@ export type SidebarData = {
     yourAssignments: ForgejoIssueData[],
     unreads: UnreadsData[]
     orgs: string[],
-    rhsState?: string | null
+    rhsState?: string | null,
+    reviewTargetDays: number,
 }
+
+export type Organization = {
+    login: string;
+}
+export type RepositoriesByOrg = {
+    name: string;
+    fullName: string;
+}
+
+export type RepositoryData = {
+    name: string;
+    full_name: string;
+    permissions: Record<string, boolean>;
+};
+
+export type ChannelRepositoriesData = {
+    channel_id: string;
+    repositories: RepositoryData[];
+};

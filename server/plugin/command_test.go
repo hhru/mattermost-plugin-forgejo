@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	testToken = "ycbODW-BWbNBGfF7ac4T5RL5ruNm5BChCXgbkY1bWHqMt80JTkLsicQwo8de3tqfqlfMaglpgjqGOmSHeGp0dA=="
+	testToken = "SVC7hd3f1caK6Xi9vG_pMgYLnnoSkVrnD8c4HMgVeEiLG1AmeScsQxyrDF0pYhuF" //nolint:gosec // test fixture, not a real credential (encrypts "forgejo-test-token" with mockKey123456789)
 )
 
 // Function to get the plugin object for test cases.
@@ -39,6 +39,11 @@ func getPluginTest(api *plugintest.API, mockKvStore *mocks.MockKvStore) *Plugin 
 
 	p.SetAPI(api)
 	p.client = pluginapi.NewClient(api, p.Driver)
+
+	// public 0.3.0 routes pluginapi log calls through the API mock; tolerate them.
+	api.On("LogWarn", mock.Anything, mock.Anything, mock.Anything).Maybe()
+	api.On("LogError", mock.Anything, mock.Anything, mock.Anything).Maybe()
+	api.On("LogDebug", mock.Anything, mock.Anything, mock.Anything).Maybe()
 
 	return p
 }
@@ -291,21 +296,9 @@ func TestExecuteCommand(t *testing.T) {
 		"help command": {
 			commandArgs: &model.CommandArgs{Command: "/forgejo help", ChannelId: "test-channelID", RootId: "test-rootID", UserId: "test-userID"},
 			expectedMsg: "###### Mattermost Forgejo Plugin - Slash Command Help\n",
-			SetupMockStore: func(mks *mocks.MockKvStore) {
-				mks.EXPECT().Get(gomock.Any(), gomock.Any()).DoAndReturn(func(key string, value interface{}) error {
-					// Cast the value to the appropriate type and updated it
-					if userInfoPtr, ok := value.(**ForgejoUserInfo); ok {
-						*userInfoPtr = &ForgejoUserInfo{
-							// Mock user info data
-							Token: &oauth2.Token{
-								AccessToken:  "ycbODW-BWbNBGfF7ac4T5RL5ruNm5BChCXgbkY1bWHqMt80JTkLsicQwo8de3tqfqlfMaglpgjqGOmSHeGp0dA==",
-								RefreshToken: "ycbODW-BWbNBGfF7ac4T5RL5ruNm5BChCXgbkY1bWHqMt80JTkLsicQwo8de3tqfqlfMaglpgjqGOmSHeGp0dA==",
-							},
-						}
-					}
-					return nil // no error, so return nil
-				})
-			},
+			// help is handled before fetching user info (no connected account required),
+			// so the KV store is not queried.
+			SetupMockStore: func(mks *mocks.MockKvStore) {},
 		},
 	}
 	for name, tt := range tests {
@@ -361,7 +354,7 @@ func TestHandleTeamReviewNotifications(t *testing.T) {
 				},
 			},
 			SetupMockStore: func(mks *mocks.MockKvStore) {
-				mks.EXPECT().Set("test-userID"+forgejoTokenKey, gomock.Any(), gomock.Any()).DoAndReturn(func(key string, value interface{}, options ...pluginapi.KVSetOption) (bool, error) {
+				mks.EXPECT().Set("test-userID"+forgejoTokenKey, gomock.Any(), gomock.Any()).DoAndReturn(func(key string, value any, options ...pluginapi.KVSetOption) (bool, error) {
 					userInfo, ok := value.(*ForgejoUserInfo)
 					require.True(t, ok, "value should be *ForgejoUserInfo")
 					assert.Equal(t, "test-userID", userInfo.UserID)
@@ -386,7 +379,7 @@ func TestHandleTeamReviewNotifications(t *testing.T) {
 				},
 			},
 			SetupMockStore: func(mks *mocks.MockKvStore) {
-				mks.EXPECT().Set("test-userID"+forgejoTokenKey, gomock.Any(), gomock.Any()).DoAndReturn(func(key string, value interface{}, options ...pluginapi.KVSetOption) (bool, error) {
+				mks.EXPECT().Set("test-userID"+forgejoTokenKey, gomock.Any(), gomock.Any()).DoAndReturn(func(key string, value any, options ...pluginapi.KVSetOption) (bool, error) {
 					userInfo, ok := value.(*ForgejoUserInfo)
 					require.True(t, ok, "value should be *ForgejoUserInfo")
 					assert.Equal(t, "test-userID", userInfo.UserID)
@@ -443,7 +436,7 @@ func TestHandleTeamReviewNotifications(t *testing.T) {
 				},
 			},
 			SetupMockStore: func(mks *mocks.MockKvStore) {
-				mks.EXPECT().Set("test-userID"+forgejoTokenKey, gomock.Any(), gomock.Any()).DoAndReturn(func(key string, value interface{}, options ...pluginapi.KVSetOption) (bool, error) {
+				mks.EXPECT().Set("test-userID"+forgejoTokenKey, gomock.Any(), gomock.Any()).DoAndReturn(func(key string, value any, options ...pluginapi.KVSetOption) (bool, error) {
 					userInfo, ok := value.(*ForgejoUserInfo)
 					require.True(t, ok, "value should be *ForgejoUserInfo")
 					assert.Equal(t, "test-userID", userInfo.UserID)

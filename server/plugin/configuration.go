@@ -1,3 +1,6 @@
+// Copyright (c) 2018-present Mattermost, Inc. All Rights Reserved.
+// See LICENSE.txt for license information.
+
 package plugin
 
 import (
@@ -10,7 +13,6 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/mattermost/mattermost/server/public/model"
-	"github.com/mattermost/mattermost/server/public/pluginapi/experimental/telemetry"
 )
 
 // configuration captures the plugin's external configuration as exposed in the Mattermost server
@@ -38,10 +40,15 @@ type Configuration struct {
 	EnableCodePreview              string `json:"enablecodepreview"`
 	EnableWebhookEventLogging      bool   `json:"enablewebhookeventlogging"`
 	ShowAuthorInCommitNotification bool   `json:"showauthorincommitnotification"`
+	GetNotificationForDraftPRs     bool   `json:"getnotificationfordraftprs"`
+	// ReviewTargetDays is the number of calendar days from PR open until a review is "due" (0 = SLA disabled).
+	ReviewTargetDays int `json:"reviewtargetdays"`
+	// OverdueReviewsChannelID is an optional channel ID for daily alerts when users have overdue review requests.
+	OverdueReviewsChannelID string `json:"overduereviewschannelid"`
 }
 
-func (c *Configuration) ToMap() (map[string]interface{}, error) {
-	var out map[string]interface{}
+func (c *Configuration) ToMap() (map[string]any, error) {
+	var out map[string]any
 	data, err := json.Marshal(c)
 	if err != nil {
 		return nil, err
@@ -91,6 +98,10 @@ func (c *Configuration) getBaseURL() string {
 func (c *Configuration) sanitize() {
 	c.BaseURL = strings.TrimRight(c.BaseURL, "/")
 	c.UploadURL = strings.TrimRight(c.UploadURL, "/")
+	c.OverdueReviewsChannelID = strings.TrimSpace(c.OverdueReviewsChannelID)
+	if c.ReviewTargetDays < 0 {
+		c.ReviewTargetDays = 0
+	}
 
 	// Trim spaces around org and OAuth credentials
 	c.ForgejoOrg = strings.TrimSpace(c.ForgejoOrg)
@@ -107,16 +118,17 @@ func (c *Configuration) IsSASS() bool {
 	return c.BaseURL == "" && c.UploadURL == ""
 }
 
-func (c *Configuration) ClientConfiguration() map[string]interface{} {
-	return map[string]interface{}{
+func (c *Configuration) ClientConfiguration() map[string]any {
+	return map[string]any{
 		"left_sidebar_enabled": c.EnableLeftSidebar,
+		"review_target_days":   c.ReviewTargetDays,
 	}
 }
 
 // Clone shallow copies the configuration. Your implementation may require a deep copy if
 // your configuration has reference types.
 func (c *Configuration) Clone() *Configuration {
-	var clone = *c
+	clone := *c
 	return &clone
 }
 
@@ -181,7 +193,7 @@ func (p *Plugin) setConfiguration(configuration *Configuration) {
 func (p *Plugin) OnConfigurationChange() error {
 	p.ensurePluginAPIClient()
 
-	var configuration = new(Configuration)
+	configuration := new(Configuration)
 
 	// Load the public configuration fields from the Mattermost server configuration.
 	err := p.client.Configuration.LoadPluginConfiguration(configuration)
@@ -191,7 +203,15 @@ func (p *Plugin) OnConfigurationChange() error {
 
 	configuration.sanitize()
 
-	p.sendWebsocketEventIfNeeded(p.getConfiguration(), configuration)
+	previousConfig := p.getConfiguration()
+	previousEncryptionKey := previousConfig.EncryptionKey
+
+	p.sendWebsocketEventIfNeeded(previousConfig, configuration)
+
+	if previousEncryptionKey != "" && configuration.EncryptionKey != "" &&
+		previousEncryptionKey != configuration.EncryptionKey {
+		go p.reEncryptUserData(configuration.EncryptionKey, previousEncryptionKey)
+	}
 
 	p.setConfiguration(configuration)
 
@@ -203,10 +223,6 @@ func (p *Plugin) OnConfigurationChange() error {
 	err = p.client.SlashCommand.Register(command)
 	if err != nil {
 		return errors.Wrap(err, "failed to register command")
-	}
-	// Some config changes require reloading tracking config
-	if p.tracker != nil {
-		p.tracker.ReloadConfig(telemetry.NewTrackerConfig(p.client.Configuration.GetConfig()))
 	}
 
 	return nil

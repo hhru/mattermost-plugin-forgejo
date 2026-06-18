@@ -1,3 +1,6 @@
+// Copyright (c) 2018-present Mattermost, Inc. All Rights Reserved.
+// See LICENSE.txt for license information.
+
 package plugin
 
 import (
@@ -122,22 +125,6 @@ func TestParseFlag(t *testing.T) {
 
 	for _, tc := range tcs {
 		assert.Equal(t, tc.Expected, parseFlag(tc.Text))
-	}
-}
-
-func TestContainsValue(t *testing.T) {
-	tcs := []struct {
-		List     []string
-		Value    string
-		Expected bool
-	}{
-		{List: []string{"value1", "value2"}, Value: "value1", Expected: true},
-		{List: []string{}, Value: "value1", Expected: false},
-		{List: []string{"value1", "value2"}, Value: "value2", Expected: true},
-	}
-
-	for _, tc := range tcs {
-		assert.Equal(t, tc.Expected, containsValue(tc.List, tc.Value))
 	}
 }
 

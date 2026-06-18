@@ -3,12 +3,15 @@
 
 import {connect} from 'react-redux';
 
-import manifest from 'manifest';
+import manifest from '@/manifest';
 
 import {LinkTooltip} from './link_tooltip';
 
 const mapStateToProps = (state) => {
-    return {connected: state[`plugins-${manifest.id}`].connected};
+    return {
+        connected: state[`plugins-${manifest.id}`].connected,
+        enterpriseURL: state[`plugins-${manifest.id}`].enterpriseURL,
+    };
 };
 
 export default connect(mapStateToProps, null)(LinkTooltip);

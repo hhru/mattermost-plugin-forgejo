@@ -1,3 +1,6 @@
+// Copyright (c) 2018-present Mattermost, Inc. All Rights Reserved.
+// See LICENSE.txt for license information.
+
 package plugin
 
 import (
@@ -17,13 +20,8 @@ var repo = github.Repository{
 
 var fRepo = FRepository{
 	FullName: sToP("mattermost-plugin-forgejo"),
-	//StargazersCount: iToP(1),
+	// StargazersCount: iToP(1),
 	HTMLURL: sToP("https://github.com/mattermost/mattermost-plugin-github"),
-}
-
-var pushEventRepository = github.PushEventRepository{
-	FullName: sToP("mattermost-plugin-forgejo"),
-	HTMLURL:  sToP("https://github.com/mattermost/mattermost-plugin-github"),
 }
 
 var singleLabel = []*github.Label{
@@ -45,8 +43,8 @@ var pullRequest = github.PullRequest{
 	Number:    iToP(42),
 	HTMLURL:   sToP("https://github.com/mattermost/mattermost-plugin-github/pull/42"),
 	Title:     sToP("Leverage git-get-head"),
-	CreatedAt: tToP(time.Date(2019, 04, 01, 02, 03, 04, 0, time.UTC)),
-	UpdatedAt: tToP(time.Date(2019, 05, 01, 02, 03, 04, 0, time.UTC)),
+	CreatedAt: tToP(time.Date(2019, 0o4, 0o1, 0o2, 0o3, 0o4, 0, time.UTC)),
+	UpdatedAt: tToP(time.Date(2019, 0o5, 0o1, 0o2, 0o3, 0o4, 0, time.UTC)),
 	Body: sToP(`<!-- Thank you for opening this pull request-->git-get-head gets the non-sent upstream heads inside the stashed non-cleaned applied areas, and after pruning bases to many archives, you can initialize the origin of the bases.
 <!-- Please make sure you have done the following :
 - Added tests
@@ -59,8 +57,8 @@ var fPullRequest = FPullRequest{
 	HTMLURL: sToP("https://github.com/mattermost/mattermost-plugin-github/pull/42"),
 	Title:   sToP("Leverage git-get-head"),
 	// TODO: check event and add if exists
-	//CreatedAt: tToP(time.Date(2019, 04, 01, 02, 03, 04, 0, time.UTC)),
-	//UpdatedAt: tToP(time.Date(2019, 05, 01, 02, 03, 04, 0, time.UTC)),
+	// CreatedAt: tToP(time.Date(2019, 04, 01, 02, 03, 04, 0, time.UTC)),
+	// UpdatedAt: tToP(time.Date(2019, 05, 01, 02, 03, 04, 0, time.UTC)),
 	Body: sToP(`<!-- Thank you for opening this pull request-->git-get-head gets the non-sent upstream heads inside the stashed non-cleaned applied areas, and after pruning bases to many archives, you can initialize the origin of the bases.
 <!-- Please make sure you have done the following :
 - Added tests
@@ -72,8 +70,8 @@ var pullRequestWithMentions = github.PullRequest{
 	Number:    iToP(42),
 	HTMLURL:   sToP("https://github.com/mattermost/mattermost-plugin-github/pull/42"),
 	Title:     sToP("Leverage git-get-head"),
-	CreatedAt: tToP(time.Date(2019, 04, 01, 02, 03, 04, 0, time.UTC)),
-	UpdatedAt: tToP(time.Date(2019, 05, 01, 02, 03, 04, 0, time.UTC)),
+	CreatedAt: tToP(time.Date(2019, 0o4, 0o1, 0o2, 0o3, 0o4, 0, time.UTC)),
+	UpdatedAt: tToP(time.Date(2019, 0o5, 0o1, 0o2, 0o3, 0o4, 0, time.UTC)),
 	Body: sToP(`<!-- Thank you for opening this pull request-->git-get-head gets the non-sent upstream heads inside the stashed non-cleaned applied areas, and after pruning bases to many archives, you can initialize the origin of the bases.
 ` + gitHubMentions + `
 <!-- Please make sure you have done the following :
@@ -86,8 +84,8 @@ var pullRequestWithLabelAndAssignee = github.PullRequest{
 	Number:    iToP(42),
 	HTMLURL:   sToP("https://github.com/mattermost/mattermost-plugin-github/pull/42"),
 	Title:     sToP("Leverage git-get-head"),
-	CreatedAt: tToP(time.Date(2019, 04, 01, 02, 03, 04, 0, time.UTC)),
-	UpdatedAt: tToP(time.Date(2019, 05, 01, 02, 03, 04, 0, time.UTC)),
+	CreatedAt: tToP(time.Date(2019, 0o4, 0o1, 0o2, 0o3, 0o4, 0, time.UTC)),
+	UpdatedAt: tToP(time.Date(2019, 0o5, 0o1, 0o2, 0o3, 0o4, 0, time.UTC)),
 	Body: sToP(`<!-- Thank you for opening this pull request-->git-get-head gets the non-sent upstream heads inside the stashed non-cleaned applied areas, and after pruning bases to many archives, you can initialize the origin of the bases.
 <!-- Please make sure you have done the following :
 - Added tests
@@ -101,8 +99,8 @@ var pullRequestWithMultipleLabelsAndAssignees = github.PullRequest{
 	Number:    iToP(42),
 	HTMLURL:   sToP("https://github.com/mattermost/mattermost-plugin-github/pull/42"),
 	Title:     sToP("Leverage git-get-head"),
-	CreatedAt: tToP(time.Date(2019, 04, 01, 02, 03, 04, 0, time.UTC)),
-	UpdatedAt: tToP(time.Date(2019, 05, 01, 02, 03, 04, 0, time.UTC)),
+	CreatedAt: tToP(time.Date(2019, 0o4, 0o1, 0o2, 0o3, 0o4, 0, time.UTC)),
+	UpdatedAt: tToP(time.Date(2019, 0o5, 0o1, 0o2, 0o3, 0o4, 0, time.UTC)),
 	Body: sToP(`<!-- Thank you for opening this pull request-->git-get-head gets the non-sent upstream heads inside the stashed non-cleaned applied areas, and after pruning bases to many archives, you can initialize the origin of the bases.
 <!-- Please make sure you have done the following :
 - Added tests
@@ -116,8 +114,8 @@ var mergedPullRequest = github.PullRequest{
 	Number:    iToP(42),
 	HTMLURL:   sToP("https://github.com/mattermost/mattermost-plugin-github/pull/42"),
 	Title:     sToP("Leverage git-get-head"),
-	CreatedAt: tToP(time.Date(2019, 04, 01, 02, 03, 04, 0, time.UTC)),
-	UpdatedAt: tToP(time.Date(2019, 05, 01, 02, 03, 04, 0, time.UTC)),
+	CreatedAt: tToP(time.Date(2019, 0o4, 0o1, 0o2, 0o3, 0o4, 0, time.UTC)),
+	UpdatedAt: tToP(time.Date(2019, 0o5, 0o1, 0o2, 0o3, 0o4, 0, time.UTC)),
 	Body: sToP(`<!-- Thank you for opening this pull request-->git-get-head gets the non-sent upstream heads inside the stashed non-cleaned applied areas, and after pruning bases to many archives, you can initialize the origin of the bases.
 <!-- Please make sure you have done the following :
 - Added tests
@@ -130,8 +128,8 @@ var issue = github.Issue{
 	Number:    iToP(1),
 	HTMLURL:   sToP("https://github.com/mattermost/mattermost-plugin-github/issues/1"),
 	Title:     sToP("Implement git-get-head"),
-	CreatedAt: tToP(time.Date(2019, 04, 01, 02, 03, 04, 0, time.UTC)),
-	UpdatedAt: tToP(time.Date(2019, 05, 01, 02, 03, 04, 0, time.UTC)),
+	CreatedAt: tToP(time.Date(2019, 0o4, 0o1, 0o2, 0o3, 0o4, 0, time.UTC)),
+	UpdatedAt: tToP(time.Date(2019, 0o5, 0o1, 0o2, 0o3, 0o4, 0, time.UTC)),
 	Body:      sToP(`<!-- Thank you for opening this issue-->git-get-head sounds like a great feature we should support`),
 }
 
@@ -139,8 +137,8 @@ var issueWithMentions = github.Issue{
 	Number:    iToP(1),
 	HTMLURL:   sToP("https://github.com/mattermost/mattermost-plugin-github/issues/1"),
 	Title:     sToP("Implement git-get-head"),
-	CreatedAt: tToP(time.Date(2019, 04, 01, 02, 03, 04, 0, time.UTC)),
-	UpdatedAt: tToP(time.Date(2019, 05, 01, 02, 03, 04, 0, time.UTC)),
+	CreatedAt: tToP(time.Date(2019, 0o4, 0o1, 0o2, 0o3, 0o4, 0, time.UTC)),
+	UpdatedAt: tToP(time.Date(2019, 0o5, 0o1, 0o2, 0o3, 0o4, 0, time.UTC)),
 	Body: sToP(`<!-- Thank you for opening this issue-->git-get-head sounds like a great feature we should support
 ` + gitHubMentions),
 }
@@ -149,8 +147,8 @@ var issueWithLabelAndAssignee = github.Issue{
 	Number:    iToP(1),
 	HTMLURL:   sToP("https://github.com/mattermost/mattermost-plugin-github/issues/1"),
 	Title:     sToP("Implement git-get-head"),
-	CreatedAt: tToP(time.Date(2019, 04, 01, 02, 03, 04, 0, time.UTC)),
-	UpdatedAt: tToP(time.Date(2019, 05, 01, 02, 03, 04, 0, time.UTC)),
+	CreatedAt: tToP(time.Date(2019, 0o4, 0o1, 0o2, 0o3, 0o4, 0, time.UTC)),
+	UpdatedAt: tToP(time.Date(2019, 0o5, 0o1, 0o2, 0o3, 0o4, 0, time.UTC)),
 	Body:      sToP(`<!-- Thank you for opening this issue-->git-get-head sounds like a great feature we should support`),
 	Labels:    singleLabel,
 	Assignee:  &user,
@@ -161,8 +159,8 @@ var issueWithMultipleLabelsAndAssignee = github.Issue{
 	Number:    iToP(1),
 	HTMLURL:   sToP("https://github.com/mattermost/mattermost-plugin-github/issues/1"),
 	Title:     sToP("Implement git-get-head"),
-	CreatedAt: tToP(time.Date(2019, 04, 01, 02, 03, 04, 0, time.UTC)),
-	UpdatedAt: tToP(time.Date(2019, 05, 01, 02, 03, 04, 0, time.UTC)),
+	CreatedAt: tToP(time.Date(2019, 0o4, 0o1, 0o2, 0o3, 0o4, 0, time.UTC)),
+	UpdatedAt: tToP(time.Date(2019, 0o5, 0o1, 0o2, 0o3, 0o4, 0, time.UTC)),
 	Body:      sToP(`<!-- Thank you for opening this issue-->git-get-head sounds like a great feature we should support`),
 	Labels:    labels,
 	Assignees: []*github.User{&user, &user},
@@ -619,25 +617,49 @@ func TestReopenedIssueTemplate(t *testing.T) {
 }
 
 func TestIssueLabelledTemplate(t *testing.T) {
-	expected := `
+	t.Run("without collapsed render style", func(t *testing.T) {
+		expected := `
 #### Implement git-get-head
 ##### [mattermost-plugin-forgejo#1](https://github.com/mattermost/mattermost-plugin-github/issues/1)
 #issue-labeled ` + "`label-name`" + ` by [panda](https://github.com/panda).
 `
 
-	actual, err := renderTemplate("issueLabelled", GetEventWithRenderConfig(
-		&github.IssuesEvent{
-			Repo:  &repo,
-			Issue: &issue,
-			Label: &github.Label{
-				Name: sToP("label-name"),
+		actual, err := renderTemplate("issueLabelled", GetEventWithRenderConfig(
+			&github.IssuesEvent{
+				Repo:  &repo,
+				Issue: &issue,
+				Label: &github.Label{
+					Name: sToP("label-name"),
+				},
+				Sender: &user,
 			},
-			Sender: &user,
-		},
-		nil,
-	))
-	require.NoError(t, err)
-	require.Equal(t, expected, actual)
+			nil,
+		))
+		require.NoError(t, err)
+		require.Equal(t, expected, actual)
+	})
+
+	t.Run("with collapsed render style", func(t *testing.T) {
+		expected := `
+[\[mattermost-plugin-forgejo\]](https://github.com/mattermost/mattermost-plugin-github) issue [#1 Implement git-get-head](https://github.com/mattermost/mattermost-plugin-github/issues/1) labeled ` + "`label-name`" + `  by [panda](https://github.com/panda).
+`
+
+		actual, err := renderTemplate("issueLabelled", &EventWithRenderConfig{
+			Event: &github.IssuesEvent{
+				Repo:  &repo,
+				Issue: &issue,
+				Label: &github.Label{
+					Name: sToP("label-name"),
+				},
+				Sender: &user,
+			},
+			Config: RenderConfig{
+				Style: "collapsed",
+			},
+		})
+		require.NoError(t, err)
+		require.Equal(t, expected, actual)
+	})
 }
 
 func TestPushedCommitsTemplate(t *testing.T) {
@@ -665,7 +687,7 @@ func TestPushedCommitsTemplate(t *testing.T) {
 			Compare: sToP("https://github.com/mattermost/mattermost-plugin-github/compare/master...branch"),
 			Ref:     sToP("refs/heads/branch"),
 		}
-		//var forced bool = event.Forced
+		// var forced bool = event.Forced
 		actual, err := renderTemplate("pushedCommits", &event)
 		require.NoError(t, err)
 		require.Equal(t, expected, actual)
@@ -1001,7 +1023,6 @@ Excited to see git-get-head land!
 
 func TestPullRequestReviewCommentEventTemplate(t *testing.T) {
 	t.Run("without mentions", func(*testing.T) {
-
 		expected := `
 [\[mattermost-plugin-forgejo\]](https://github.com/mattermost/mattermost-plugin-github) New review comment by [panda](https://github.com/panda) on [#42 Leverage git-get-head](https://github.com/mattermost/mattermost-plugin-github/pull/42):
 
@@ -1314,7 +1335,6 @@ func TestIssueNotification(t *testing.T) {
 
 func TestPullRequestReviewNotification(t *testing.T) {
 	t.Run("approved", func(t *testing.T) {
-
 		expected := `
 [panda](https://github.com/panda) approved your pull request [mattermost-plugin-forgejo#42](https://github.com/mattermost/mattermost-plugin-github/pull/42) - Leverage git-get-head
 >Excited to see git-get-head land!
@@ -1547,6 +1567,108 @@ Commit: https://github.com/mattermost/mattermost-plugin-github/commit/1234567890
 						Conclusion: sToP("success"),
 					},
 				},
+			},
+		})
+		require.NoError(t, err)
+		require.Equal(t, expected, actual)
+	})
+}
+
+func TestWorkflowRunNotification(t *testing.T) {
+	t.Run("failed", func(t *testing.T) {
+		expected := `
+[\[mattermost-plugin-forgejo\]](https://github.com/mattermost/mattermost-plugin-github) Workflow [CI Pipeline](https://github.com/mattermost/mattermost-plugin-github/actions/runs/99999) failed :x:
+Branch: ` + "`main`" + ` | Run [#42](https://github.com/mattermost/mattermost-plugin-github/actions/runs/99999) | Triggered by [panda](https://github.com/panda)
+Commit: https://github.com/mattermost/mattermost-plugin-github/commit/abc1234567`
+
+		actual, err := renderTemplate("workflowRunCompleted", &github.WorkflowRunEvent{
+			Repo:   &repo,
+			Sender: &user,
+			Action: sToP(actionCompleted),
+			Workflow: &github.Workflow{
+				Name: sToP("CI Pipeline"),
+			},
+			WorkflowRun: &github.WorkflowRun{
+				Conclusion: sToP("failure"),
+				HeadBranch: sToP("main"),
+				HeadSHA:    sToP("abc1234567"),
+				HTMLURL:    sToP("https://github.com/mattermost/mattermost-plugin-github/actions/runs/99999"),
+				RunNumber:  iToP(42),
+			},
+		})
+		require.NoError(t, err)
+		require.Equal(t, expected, actual)
+	})
+
+	t.Run("success", func(t *testing.T) {
+		expected := `
+[\[mattermost-plugin-forgejo\]](https://github.com/mattermost/mattermost-plugin-github) Workflow [CI Pipeline](https://github.com/mattermost/mattermost-plugin-github/actions/runs/99999) succeeded :white_check_mark:
+Branch: ` + "`main`" + ` | Run [#42](https://github.com/mattermost/mattermost-plugin-github/actions/runs/99999) | Triggered by [panda](https://github.com/panda)
+Commit: https://github.com/mattermost/mattermost-plugin-github/commit/abc1234567`
+
+		actual, err := renderTemplate("workflowRunCompleted", &github.WorkflowRunEvent{
+			Repo:   &repo,
+			Sender: &user,
+			Action: sToP(actionCompleted),
+			Workflow: &github.Workflow{
+				Name: sToP("CI Pipeline"),
+			},
+			WorkflowRun: &github.WorkflowRun{
+				Conclusion: sToP("success"),
+				HeadBranch: sToP("main"),
+				HeadSHA:    sToP("abc1234567"),
+				HTMLURL:    sToP("https://github.com/mattermost/mattermost-plugin-github/actions/runs/99999"),
+				RunNumber:  iToP(42),
+			},
+		})
+		require.NoError(t, err)
+		require.Equal(t, expected, actual)
+	})
+
+	t.Run("cancelled", func(t *testing.T) {
+		expected := `
+[\[mattermost-plugin-forgejo\]](https://github.com/mattermost/mattermost-plugin-github) Workflow [CI Pipeline](https://github.com/mattermost/mattermost-plugin-github/actions/runs/99999) was cancelled :no_entry_sign:
+Branch: ` + "`main`" + ` | Run [#42](https://github.com/mattermost/mattermost-plugin-github/actions/runs/99999) | Triggered by [panda](https://github.com/panda)
+Commit: https://github.com/mattermost/mattermost-plugin-github/commit/abc1234567`
+
+		actual, err := renderTemplate("workflowRunCompleted", &github.WorkflowRunEvent{
+			Repo:   &repo,
+			Sender: &user,
+			Action: sToP(actionCompleted),
+			Workflow: &github.Workflow{
+				Name: sToP("CI Pipeline"),
+			},
+			WorkflowRun: &github.WorkflowRun{
+				Conclusion: sToP("cancelled"),
+				HeadBranch: sToP("main"),
+				HeadSHA:    sToP("abc1234567"),
+				HTMLURL:    sToP("https://github.com/mattermost/mattermost-plugin-github/actions/runs/99999"),
+				RunNumber:  iToP(42),
+			},
+		})
+		require.NoError(t, err)
+		require.Equal(t, expected, actual)
+	})
+
+	t.Run("timed_out", func(t *testing.T) {
+		expected := `
+[\[mattermost-plugin-forgejo\]](https://github.com/mattermost/mattermost-plugin-github) Workflow [CI Pipeline](https://github.com/mattermost/mattermost-plugin-github/actions/runs/99999) timed out :warning:
+Branch: ` + "`main`" + ` | Run [#42](https://github.com/mattermost/mattermost-plugin-github/actions/runs/99999) | Triggered by [panda](https://github.com/panda)
+Commit: https://github.com/mattermost/mattermost-plugin-github/commit/abc1234567`
+
+		actual, err := renderTemplate("workflowRunCompleted", &github.WorkflowRunEvent{
+			Repo:   &repo,
+			Sender: &user,
+			Action: sToP(actionCompleted),
+			Workflow: &github.Workflow{
+				Name: sToP("CI Pipeline"),
+			},
+			WorkflowRun: &github.WorkflowRun{
+				Conclusion: sToP("timed_out"),
+				HeadBranch: sToP("main"),
+				HeadSHA:    sToP("abc1234567"),
+				HTMLURL:    sToP("https://github.com/mattermost/mattermost-plugin-github/actions/runs/99999"),
+				RunNumber:  iToP(42),
 			},
 		})
 		require.NoError(t, err)

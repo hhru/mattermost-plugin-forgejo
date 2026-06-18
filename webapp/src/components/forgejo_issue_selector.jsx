@@ -7,8 +7,8 @@ import PropTypes from 'prop-types';
 import debounce from 'debounce-promise';
 import AsyncSelect from 'react-select/async';
 
-import {getStyleForReactSelect} from 'utils/styles';
-import Client from 'client';
+import {getStyleForReactSelect} from '@/utils/styles';
+import Client from '@/client';
 
 const searchDebounceDelay = 400;
 
@@ -62,7 +62,7 @@ export default class ForgejoIssueSelector extends PureComponent {
     onChange = (e) => {
         const value = e ? e.value : '';
         this.props.onChange(value);
-    }
+    };
 
     isValid = () => {
         if (!this.props.required) {

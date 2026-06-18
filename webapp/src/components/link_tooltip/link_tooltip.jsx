@@ -1,40 +1,57 @@
-import React, {useEffect, useState} from 'react';
+// Copyright (c) 2015-present Mattermost, Inc. All Rights Reserved.
+// See LICENSE.txt for license information.
+
+import React, {useEffect, useMemo, useState} from 'react';
 import PropTypes from 'prop-types';
 import './tooltip.css';
 import {GitMergeIcon, GitPullRequestIcon, IssueClosedIcon, IssueOpenedIcon} from '@primer/octicons-react';
 import ReactMarkdown from 'react-markdown';
 
-import Client from 'client';
+import Client from '@/client';
+
 import {getLabelFontColor, hexToRGB} from '../../utils/styles';
 
 const maxTicketDescriptionLength = 160;
 
-export const LinkTooltip = ({href, connected, show, theme}) => {
+export const LinkTooltip = ({href, connected, show, theme, enterpriseURL}) => {
     const [data, setData] = useState(null);
     useEffect(() => {
         const initData = async () => {
-            if (href.includes('forgejo.pyn.ru/')) {
-                const [owner, repo, type, number] = href.split('forgejo.pyn.ru/')[1].split('/');
-                if (!owner | !repo | !type | !number) {
-                    return;
-                }
+            let owner;
+            let repo;
+            let type;
+            let number;
 
-                let res;
-                switch (type) {
-                case 'issues':
-                    res = await Client.getIssue(owner, repo, number);
-                    break;
-                case 'pull':
-                    res = await Client.getPullRequest(owner, repo, number);
-                    break;
+            if (href.includes('forgejo.pyn.ru/')) {
+                [owner, repo, type, number] = href.split('forgejo.pyn.ru/')[1].split('/');
+            } else if (enterpriseURL) {
+                const entURL = enterpriseURL.endsWith('/') ? enterpriseURL : enterpriseURL + '/';
+                if (href.startsWith(entURL)) {
+                    [owner, repo, type, number] = href.substring(entURL.length).split('/');
                 }
-                if (res) {
-                    res.owner = owner;
-                    res.repo = repo;
-                    res.type = type;
-                }
-                setData(res);
+            } else if (href.includes('github.com/')) {
+                [owner, repo, type, number] = href.split('github.com/')[1].split('/');
             }
+
+            if (!owner || !repo || !type || !number) {
+                return;
+            }
+
+            let res;
+            switch (type) {
+            case 'issues':
+                res = await Client.getIssue(owner, repo, number);
+                break;
+            case 'pull':
+                res = await Client.getPullRequest(owner, repo, number);
+                break;
+            }
+            if (res) {
+                res.owner = owner;
+                res.repo = repo;
+                res.type = type;
+            }
+            setData(res);
         };
 
         // show is not provided for Mattermost Server < 5.28
@@ -43,7 +60,27 @@ export const LinkTooltip = ({href, connected, show, theme}) => {
         }
 
         initData();
-    }, [connected, data, href, show]);
+    }, [connected, data, href, show, enterpriseURL]);
+
+    const openedByLink = useMemo(() => {
+        if (!data?.user?.login) {
+            return null;
+        }
+
+        // Immediately map the html_url value when present (which should work for both Enterprise and Cloud)
+        if (data.user.html_url) {
+            return data.user.html_url;
+        }
+
+        // Fallback to a generic enterprise URL when appropriate, handling possible trailing slashes
+        if (enterpriseURL) {
+            const entURL = enterpriseURL.endsWith('/') ? enterpriseURL : enterpriseURL + '/';
+            return `${entURL}${data.user.login}`;
+        }
+
+        // Fallback to the configured Forgejo instance.
+        return `https://forgejo.pyn.ru/${data.user.login}`;
+    }, [data, enterpriseURL]);
 
     const getIconElement = () => {
         const iconProps = {
@@ -113,7 +150,7 @@ export const LinkTooltip = ({href, connected, show, theme}) => {
 
                     <div className='body d-flex mt-2'>
                         <span className='pt-1 pb-1 pr-2'>
-                            { getIconElement() }
+                            {getIconElement()}
                         </span>
 
                         {/* info */}
@@ -130,7 +167,13 @@ export const LinkTooltip = ({href, connected, show, theme}) => {
                             {data?.user?.login && (
                                 <p className='opened-by'>
                                     {'Opened by '}
-                                    <a href={`https://forgejo.pyn.ru/${data.user.login}`}>{data.user.login}</a>
+                                    <a
+                                        href={openedByLink}
+                                        target='_blank'
+                                        rel='noopener noreferrer'
+                                    >
+                                        {data.user.login}
+                                    </a>
                                 </p>
                             )}
                             <div className='markdown-text mt-1 mb-1'>
@@ -183,4 +226,5 @@ LinkTooltip.propTypes = {
     connected: PropTypes.bool.isRequired,
     theme: PropTypes.object.isRequired,
     show: PropTypes.bool,
+    enterpriseURL: PropTypes.string,
 };

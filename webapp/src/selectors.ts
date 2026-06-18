@@ -1,3 +1,6 @@
+// Copyright (c) 2018-present Mattermost, Inc. All Rights Reserved.
+// See LICENSE.txt for license information.
+
 import {getConfig} from 'mattermost-redux/selectors/entities/general';
 
 import {createSelector} from 'reselect';
@@ -10,7 +13,7 @@ const emptyArray: ForgejoIssueData[] | UnreadsData[] = [];
 export const getPluginState = (state: GlobalState): PluginState => state['plugins-forgejo'];
 
 export const getServerRoute = (state: GlobalState) => {
-    const config = getConfig(state);
+    const config = getConfig(state as any);
     let basePath = '';
     if (config && config.SiteURL) {
         basePath = new URL(config.SiteURL).pathname;
@@ -51,7 +54,7 @@ function mapPrsToDetails(prs: ForgejoIssueData[], details: PrsDetailsData[]) {
 export const getSidebarData = createSelector(
     getPluginState,
     (pluginState): SidebarData => {
-        const {username, sidebarContent, reviewDetails, yourPrDetails, organizations, rhsState} = pluginState;
+        const {username, sidebarContent, reviewDetails, yourPrDetails, organizations, rhsState, configuration: pluginConfig} = pluginState;
         return {
             username,
             reviews: mapPrsToDetails(sidebarContent.reviews || emptyArray, reviewDetails),
@@ -60,6 +63,7 @@ export const getSidebarData = createSelector(
             unreads: sidebarContent.unreads || emptyArray,
             orgs: organizations,
             rhsState,
+            reviewTargetDays: pluginConfig.review_target_days || 0,
         };
     },
 );

@@ -1,4 +1,4 @@
-// Copyright (c) 2015-present Mattermost, Inc. All Rights Reserved.
+// Copyright (c) 2018-present Mattermost, Inc. All Rights Reserved.
 // See LICENSE.txt for license information.
 
 import * as React from 'react';
@@ -53,6 +53,17 @@ function ForgejoItems(props: ForgejoItemsProps) {
             userName = item.owner.login;
         }
 
+        // Link the username to the Forgejo instance the item lives on, derived
+        // from the item's own html_url, instead of a hardcoded github.com host.
+        let userUrl = '';
+        if (userName && item.html_url) {
+            try {
+                userUrl = `${new URL(item.html_url).origin}/${userName}`;
+            } catch {
+                userUrl = '';
+            }
+        }
+
         let number: JSX.Element | null = null;
         if (item.number) {
             const iconProps: IconProps = {
@@ -62,8 +73,11 @@ function ForgejoItems(props: ForgejoItemsProps) {
 
             let icon;
             let title;
-            if (item.pullRequest) {
-                // item is a pull request
+            const url = new URL(item.html_url);
+            const segments = url.pathname.split('/').filter(Boolean);
+            const typeSegment = segments[2];
+
+            if (typeSegment === 'pull') {
                 icon = <GitPullRequestIcon {...iconProps}/>;
                 title = 'Pull Request';
             } else {
@@ -281,7 +295,20 @@ function ForgejoItems(props: ForgejoItemsProps) {
                             <CalendarIcon size={16}/> {'Opened '} {formatTimeSince(item.created_at)} {' ago'}
                         </>
                     )}
-                    {userName && ' by ' + userName}
+                    {userName && (
+                        <>
+                            {' by '}
+                            {userUrl ? (
+                                <a
+                                    href={userUrl}
+                                    target='_blank'
+                                    rel='noopener noreferrer'
+                                >
+                                    {userName}
+                                </a>
+                            ) : userName}
+                        </>
+                    )}
                     {(item.created_at || userName) && '.'}
                     {milestone}
                     {item.reason ? (<>
@@ -393,7 +420,11 @@ function getReviewText(item: ForgejoItem, style: any, secondLine: boolean) {
     };
 
     const lastReviews = item.reviews.reduce(reverse, []).filter((v) => {
-        if (v.user.login === item.user.login) {
+        if (!v.user) {
+            return false;
+        }
+
+        if (item.user && v.user.login === item.user.login) {
             return false;
         }
 

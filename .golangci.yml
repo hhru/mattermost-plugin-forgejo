@@ -1,53 +1,64 @@
+version: "2"
+
 run:
   timeout: 5m
   modules-download-mode: readonly
 
-linters-settings:
-  gofmt:
-    simplify: true
-  goimports:
-    local-prefixes: github.com/mattermost/mattermost-plugin-github
-  govet:
-    check-shadowing: true
-    enable-all: true
-    disable:
-      - fieldalignment
-  misspell:
-    locale: US
-  revive:
-    rules:
-      - name: error-strings
-        disabled: true
-
 linters:
-  disable-all: true
+  default: none
   enable:
+    - bidichk
     - bodyclose
     - errcheck
     - gocritic
-    - gofmt
-    - goimports
     - gosec
-    - gosimple
     - govet
     - ineffassign
+    - makezero
     - misspell
+    - modernize
     - nakedret
     - revive
     - staticcheck
-    - stylecheck
-    - typecheck
     - unconvert
+    - unqueryvet
     - unused
     - whitespace
+  settings:
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+    revive:
+      rules:
+        - name: exported
+          disabled: true
+        - name: unused-parameter
+          disabled: true
+    unqueryvet:
+      check-sql-builders: true
+  exclusions:
+    paths:
+      - webapp/node_modules
+    rules:
+      - path: server/configuration.go
+        linters:
+          - unused
+      - path: _test\.go
+        linters:
+          - bodyclose
 
-issues:
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - bodyclose
-        - goconst
-        - scopelint # https://github.com/kyoh86/scopelint/issues/4
-    - path: server/plugin/webhook.go
-      linters:
-        - goconst
+formatters:
+  enable:
+    - gofmt
+    - gofumpt
+    - goimports
+  settings:
+    gofmt:
+      simplify: true
+      rewrite-rules:
+        - pattern: interface{}
+          replacement: any
+    goimports:
+      local-prefixes:
+        - github.com/mattermost/mattermost-plugin-github

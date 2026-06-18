@@ -21,11 +21,6 @@ type PingBroker interface {
 	SubscribePings() <-chan *github.PingEvent
 }
 
-type Tracker interface {
-	TrackEvent(event string, properties map[string]interface{})
-	TrackUserEvent(event, userID string, properties map[string]interface{})
-}
-
 type FlowManager struct {
 	client           *pluginapi.Client
 	pluginID         string
@@ -35,7 +30,6 @@ type FlowManager struct {
 	getGitHubClient  func(ctx context.Context, userID string) (*github.Client, error)
 
 	pingBroker PingBroker
-	tracker    Tracker
 
 	setupFlow        *flow.Flow
 	oauthFlow        *flow.Flow
@@ -53,7 +47,6 @@ func (p *Plugin) NewFlowManager() (*FlowManager, error) {
 		getGitHubClient:  p.GetGitHubClient,
 
 		pingBroker: p.webhookBroker,
-		tracker:    p,
 	}
 
 	setupFlow, err := fm.newFlow("setup")
@@ -135,8 +128,6 @@ func (fm *FlowManager) doneStep() flow.Step {
 }
 
 func (fm *FlowManager) onDone(f *flow.Flow) {
-	fm.trackCompleteSetupWizard(f.UserID)
-
 	delegatedFrom := f.GetState().GetString(keyDelegatedFrom)
 	if delegatedFrom != "" {
 		err := fm.setupFlow.ForUser(delegatedFrom).Go(stepDelegateComplete)
@@ -244,22 +235,7 @@ func (fm *FlowManager) StartSetupWizard(userID string, delegatedFrom string) err
 
 	fm.client.Log.Debug("Started setup wizard", "userID", userID, "delegatedFrom", delegatedFrom)
 
-	fm.trackStartSetupWizard(userID, delegatedFrom != "")
-
 	return nil
-}
-
-func (fm *FlowManager) trackStartSetupWizard(userID string, fromInvite bool) {
-	fm.tracker.TrackUserEvent("setup_wizard_start", userID, map[string]interface{}{
-		"from_invite": fromInvite,
-		"time":        model.GetMillis(),
-	})
-}
-
-func (fm *FlowManager) trackCompleteSetupWizard(userID string) {
-	fm.tracker.TrackUserEvent("setup_wizard_complete", userID, map[string]interface{}{
-		"time": model.GetMillis(),
-	})
 }
 
 func (fm *FlowManager) StartOauthWizard(userID string) error {
@@ -270,21 +246,7 @@ func (fm *FlowManager) StartOauthWizard(userID string) error {
 		return err
 	}
 
-	fm.trackStartOauthWizard(userID)
-
 	return nil
-}
-
-func (fm *FlowManager) trackStartOauthWizard(userID string) {
-	fm.tracker.TrackUserEvent("oauth_wizard_start", userID, map[string]interface{}{
-		"time": model.GetMillis(),
-	})
-}
-
-func (fm *FlowManager) trackCompleteOauthWizard(userID string) {
-	fm.tracker.TrackUserEvent("oauth_wizard_complete", userID, map[string]interface{}{
-		"time": model.GetMillis(),
-	})
 }
 
 func (fm *FlowManager) stepWelcome() flow.Step {
@@ -334,7 +296,7 @@ func (fm *FlowManager) stepDelegateQuestion() flow.Step {
 		})
 }
 
-func (fm *FlowManager) submitDelegateSelection(f *flow.Flow, submitted map[string]interface{}) (flow.Name, flow.State, map[string]string, error) {
+func (fm *FlowManager) submitDelegateSelection(f *flow.Flow, submitted map[string]any) (flow.Name, flow.State, map[string]string, error) {
 	delegateIDRaw, ok := submitted["delegate"]
 	if !ok {
 		return "", nil, nil, errors.New("delegate missing")
@@ -389,7 +351,6 @@ func (fm *FlowManager) stepBase() flow.Step {
 				SubmitLabel:      "Save & continue",
 				Elements: []model.DialogElement{
 					{
-
 						DisplayName: "Base URL",
 						Name:        "base_url",
 						Type:        "text",
@@ -415,7 +376,7 @@ func (fm *FlowManager) stepBase() flow.Step {
 		WithButton(cancelButton())
 }
 
-func (fm *FlowManager) submitBaseConfig(f *flow.Flow, submitted map[string]interface{}) (flow.Name, flow.State, map[string]string, error) {
+func (fm *FlowManager) submitBaseConfig(f *flow.Flow, submitted map[string]any) (flow.Name, flow.State, map[string]string, error) {
 	errorList := map[string]string{}
 
 	baseURLRaw, ok := submitted["base_url"]
@@ -535,7 +496,7 @@ func (fm *FlowManager) stepOAuthInput() flow.Step {
 		WithButton(cancelButton())
 }
 
-func (fm *FlowManager) submitOAuthConfig(f *flow.Flow, submitted map[string]interface{}) (flow.Name, flow.State, map[string]string, error) {
+func (fm *FlowManager) submitOAuthConfig(f *flow.Flow, submitted map[string]any) (flow.Name, flow.State, map[string]string, error) {
 	errorList := map[string]string{}
 
 	clientIDRaw, ok := submitted["client_id"]
@@ -599,8 +560,7 @@ func (fm *FlowManager) stepOAuthConnect() flow.Step {
 	connectText := fmt.Sprintf("Go [here](%s) to connect your account.", connectURL)
 	return flow.NewStep(stepOAuthConnect).
 		WithText(connectText).
-		WithPretext(connectPretext).
-		OnRender(func(f *flow.Flow) { fm.trackCompleteOauthWizard(f.UserID) })
+		WithPretext(connectPretext)
 	// The API handler will advance to the next step and complete the flow
 }
 
@@ -612,21 +572,7 @@ func (fm *FlowManager) StartWebhookWizard(userID string) error {
 		return err
 	}
 
-	fm.trackStartWebhookWizard(userID)
-
 	return nil
-}
-
-func (fm *FlowManager) trackStartWebhookWizard(userID string) {
-	fm.tracker.TrackUserEvent("webhook_wizard_start", userID, map[string]interface{}{
-		"time": model.GetMillis(),
-	})
-}
-
-func (fm *FlowManager) trackCompleteWebhookWizard(userID string) {
-	fm.tracker.TrackUserEvent("webhook_wizard_complete", userID, map[string]interface{}{
-		"time": model.GetMillis(),
-	})
 }
 
 func (fm *FlowManager) stepWebhookQuestion() flow.Step {
@@ -643,7 +589,6 @@ The final setup step requires a Mattermost System Admin to create a webhook for 
 				SubmitLabel: "Create",
 				Elements: []model.DialogElement{
 					{
-
 						DisplayName: "Forgejo repository or organization name",
 						Name:        "repo_org",
 						Type:        "text",
@@ -662,7 +607,7 @@ The final setup step requires a Mattermost System Admin to create a webhook for 
 		})
 }
 
-func (fm *FlowManager) submitWebhook(f *flow.Flow, submitted map[string]interface{}) (flow.Name, flow.State, map[string]string, error) {
+func (fm *FlowManager) submitWebhook(f *flow.Flow, submitted map[string]any) (flow.Name, flow.State, map[string]string, error) {
 	repoOrgRaw, ok := submitted["repo_org"]
 	if !ok {
 		return "", nil, nil, errors.New("repo_org missing")
@@ -681,14 +626,14 @@ func (fm *FlowManager) submitWebhook(f *flow.Flow, submitted map[string]interfac
 		return "", nil, nil, errors.New("invalid format")
 	}
 
-	webhookEvents := []string{"create", "delete", "issue_comment", "issues", "pull_request", "pull_request_review", "pull_request_review_comment", "push", "star"}
+	webhookEvents := []string{"create", "delete", "issue_comment", "issues", "pull_request", "pull_request_review", "pull_request_review_comment", "push", "star", "release"}
 
 	webHookURL, err := buildPluginURL(fm.client, "webhook")
 	if err != nil {
 		fm.client.Log.Warn("Failed to build webHookURL", "err", err)
 	}
 
-	webhookConfig := map[string]interface{}{
+	webhookConfig := map[string]any{
 		"content_type": "json",
 		"insecure_ssl": "0",
 		"secret":       config.WebhookSecret,
@@ -769,7 +714,6 @@ func (fm *FlowManager) stepWebhookConfirmation() flow.Step {
 	return flow.NewStep(stepWebhookConfirmation).
 		WithTitle("Success! :tada: You've successfully set up your Mattermost Forgejo integration! ").
 		WithText("Use `/forgejo subscriptions add` to subscribe any Mattermost channel to your Forgejo repository. [Learn more](https://github.com/mattermost/mattermost-plugin-github#slash-commands)").
-		OnRender(func(f *flow.Flow) { fm.trackCompleteWebhookWizard(f.UserID) }).
 		Next("")
 }
 
@@ -781,21 +725,7 @@ func (fm *FlowManager) StartAnnouncementWizard(userID string) error {
 		return err
 	}
 
-	fm.trackStartAnnouncementWizard(userID)
-
 	return nil
-}
-
-func (fm *FlowManager) trackStartAnnouncementWizard(userID string) {
-	fm.tracker.TrackUserEvent("announcement_wizard_start", userID, map[string]interface{}{
-		"time": model.GetMillis(),
-	})
-}
-
-func (fm *FlowManager) trackCompletAnnouncementWizard(userID string) {
-	fm.tracker.TrackUserEvent("announcement_wizard_complete", userID, map[string]interface{}{
-		"time": model.GetMillis(),
-	})
 }
 
 func (fm *FlowManager) stepAnnouncementQuestion() flow.Step {
@@ -824,7 +754,7 @@ func (fm *FlowManager) stepAnnouncementQuestion() flow.Step {
 						Name:        "message",
 						Type:        "textarea",
 						Default:     defaultMessage,
-						HelpText:    "You can edit this message before sending it.",
+						HelpText:    "You can edit this message before sending it. Max Characters: 3000",
 					},
 				},
 			},
@@ -837,7 +767,7 @@ func (fm *FlowManager) stepAnnouncementQuestion() flow.Step {
 		})
 }
 
-func (fm *FlowManager) submitChannelAnnouncement(f *flow.Flow, submitted map[string]interface{}) (flow.Name, flow.State, map[string]string, error) {
+func (fm *FlowManager) submitChannelAnnouncement(f *flow.Flow, submitted map[string]any) (flow.Name, flow.State, map[string]string, error) {
 	channelIDRaw, ok := submitted["channel_id"]
 	if !ok {
 		return "", nil, nil, errors.New("channel_id missing")
@@ -879,14 +809,15 @@ func (fm *FlowManager) submitChannelAnnouncement(f *flow.Flow, submitted map[str
 func (fm *FlowManager) stepAnnouncementConfirmation() flow.Step {
 	return flow.NewStep(stepAnnouncementConfirmation).
 		WithText("Message to ~{{ .ChannelName }} was sent.").
-		Next("").
-		OnRender(func(f *flow.Flow) { fm.trackCompletAnnouncementWizard(f.UserID) })
+		Next("")
 }
 
 func printGithubErrorResponse(err *github.ErrorResponse) error {
-	msg := err.Message
-	for _, err := range err.Errors {
-		msg += ", " + err.Message
+	var sb strings.Builder
+	sb.WriteString(err.Message)
+	for _, e := range err.Errors {
+		sb.WriteString(", ")
+		sb.WriteString(e.Message)
 	}
-	return errors.New(msg)
+	return errors.New(sb.String())
 }

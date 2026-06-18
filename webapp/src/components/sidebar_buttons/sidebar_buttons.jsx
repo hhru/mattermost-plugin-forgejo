@@ -7,6 +7,7 @@ import PropTypes from 'prop-types';
 import {makeStyleFromTheme, changeOpacity} from 'mattermost-redux/utils/theme_utils';
 
 import {RHSStates} from '../../constants';
+import {reviewsHaveOverdue} from '../../utils/sla';
 
 export default class SidebarButtons extends React.PureComponent {
     static propTypes = {
@@ -15,6 +16,7 @@ export default class SidebarButtons extends React.PureComponent {
         clientId: PropTypes.string,
         baseURL: PropTypes.string,
         reviews: PropTypes.arrayOf(PropTypes.object),
+        reviewTargetDays: PropTypes.number,
         unreads: PropTypes.arrayOf(PropTypes.object),
         yourPrs: PropTypes.arrayOf(PropTypes.object),
         yourAssignments: PropTypes.arrayOf(PropTypes.object),
@@ -71,17 +73,17 @@ export default class SidebarButtons extends React.PureComponent {
         this.setState({refreshing: true});
         await this.props.actions.getSidebarContent();
         this.setState({refreshing: false});
-    }
+    };
 
     openConnectWindow = (e) => {
         e.preventDefault();
         window.open('/plugins/forgejo/oauth/connect', 'Connect Mattermost to Forgejo', 'height=570,width=520');
-    }
+    };
 
     openRHS = (rhsState) => {
         this.props.actions.updateRhsState(rhsState);
         this.props.showRHSPlugin();
-    }
+    };
 
     render() {
         const style = getStyle(this.props.theme);
@@ -118,6 +120,7 @@ export default class SidebarButtons extends React.PureComponent {
         }
 
         const reviews = this.props.reviews || [];
+        const reviewTargetDays = this.props.reviewTargetDays || 0;
         const yourPrs = this.props.yourPrs || [];
         const unreads = this.props.unreads || [];
         const yourAssignments = this.props.yourAssignments || [];
@@ -159,7 +162,7 @@ export default class SidebarButtons extends React.PureComponent {
                 >
                     <a
                         onClick={() => this.openRHS(RHSStates.REVIEWS)}
-                        style={button}
+                        style={reviewButtonStyle(button, reviews, reviewTargetDays)}
                     >
                         <i className='fa fa-code-fork'/>
                         {' ' + reviews.length}
@@ -207,6 +210,23 @@ export default class SidebarButtons extends React.PureComponent {
             </div>
         );
     }
+}
+
+function reviewButtonStyle(base, reviews, targetDays) {
+    // Match getReviewSLAStatus / reviewsHaveOverdue: a non-positive target means SLA
+    // is not configured. !targetDays alone would let a negative value through and
+    // produce a misleading green indicator.
+    if (!targetDays || targetDays <= 0) {
+        return base;
+    }
+    const list = reviews || [];
+    if (list.length === 0) {
+        return base;
+    }
+    if (reviewsHaveOverdue(list, targetDays)) {
+        return {...base, color: 'var(--dnd-indicator)'};
+    }
+    return {...base, color: 'var(--online-indicator)'};
 }
 
 const getStyle = makeStyleFromTheme((theme) => {

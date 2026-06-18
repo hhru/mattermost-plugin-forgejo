@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -13,11 +14,12 @@ import (
 )
 
 const (
-	SubscriptionsKey      = "subscriptions"
-	flagExcludeOrgMember  = "exclude-org-member"
-	flagRenderStyle       = "render-style"
-	flagFeatures          = "features"
-	flagExcludeRepository = "exclude"
+	SubscriptionsKey        = "subscriptions"
+	flagExcludeOrgMember    = "exclude-org-member"
+	flagRenderStyle         = "render-style"
+	flagFeatures            = "features"
+	flagExcludeRepository   = "exclude"
+	SubscriptionUnavailable = "no subscription exists for `%s` in the channel"
 )
 
 type SubscriptionFlags struct {
@@ -128,6 +130,14 @@ func (s *Subscription) Workflows() bool {
 	return strings.Contains(s.Features.String(), featureWorkflowFailure) || strings.Contains(s.Features.String(), featureWorkflowSuccess)
 }
 
+func (s *Subscription) WorkflowRunFailures() bool {
+	return strings.Contains(s.Features.String(), featureWorkflowRunFailure)
+}
+
+func (s *Subscription) WorkflowRunSuccesses() bool {
+	return strings.Contains(s.Features.String(), featureWorkflowRunSuccess)
+}
+
 func (s *Subscription) Release() bool {
 	return strings.Contains(s.Features.String(), featureReleases)
 }
@@ -162,12 +172,7 @@ func (s *Subscription) RenderStyle() string {
 }
 
 func (s *Subscription) excludedRepoForSub(repoFullName string) bool {
-	for _, repository := range s.Flags.ExcludeRepository {
-		if repository == repoFullName {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(s.Flags.ExcludeRepository, repoFullName)
 }
 
 func (p *Plugin) Subscribe(ctx context.Context, githubClient *github.Client, userID, owner, repo, channelID string, features Features, flags SubscriptionFlags) error {
@@ -312,7 +317,7 @@ func (p *Plugin) GetSubscriptions() (*Subscriptions, error) {
 }
 
 func (p *Plugin) StoreSubscriptions(s *Subscriptions) error {
-	return p.store.SetAtomicWithRetries(SubscriptionsKey, func(_ []byte) (interface{}, error) {
+	return p.store.SetAtomicWithRetries(SubscriptionsKey, func(_ []byte) (any, error) {
 		modifiedBytes, err := json.Marshal(s)
 		if err != nil {
 			return nil, errors.Wrap(err, "could not store subscriptions in KV store")
@@ -361,17 +366,32 @@ func (p *Plugin) GetSubscribedChannelsForRepository(repoFullName string, repoIsP
 	return subsToReturn
 }
 
-func (p *Plugin) Unsubscribe(channelID, repo, owner string) error {
+type SubscriptionError struct {
+	Code  int
+	Error error
+}
+
+const (
+	SubscriptionNotFound = iota
+	SubscriptionAlreadyExists
+	InternalServerError
+)
+
+func NewSubscriptionError(code int, err error) *SubscriptionError {
+	return &SubscriptionError{Code: code, Error: err}
+}
+
+func (p *Plugin) Unsubscribe(channelID, repo, owner string) *SubscriptionError {
 	repoWithOwner := fmt.Sprintf("%s/%s", owner, repo)
 
 	subs, err := p.GetSubscriptions()
 	if err != nil {
-		return errors.Wrap(err, "could not get subscriptions")
+		return NewSubscriptionError(InternalServerError, errors.Wrap(err, "could not get subscriptions"))
 	}
 
 	repoSubs := subs.Repositories[repoWithOwner]
 	if repoSubs == nil {
-		return nil
+		return NewSubscriptionError(SubscriptionNotFound, errors.Errorf(SubscriptionUnavailable, strings.TrimSuffix(repoWithOwner, "/")))
 	}
 
 	removed := false
@@ -383,11 +403,13 @@ func (p *Plugin) Unsubscribe(channelID, repo, owner string) error {
 		}
 	}
 
-	if removed {
-		subs.Repositories[repoWithOwner] = repoSubs
-		if err := p.StoreSubscriptions(subs); err != nil {
-			return errors.Wrap(err, "could not store subscriptions")
-		}
+	if !removed {
+		return NewSubscriptionError(SubscriptionNotFound, errors.Errorf(SubscriptionUnavailable, strings.TrimSuffix(repoWithOwner, "/")))
+	}
+
+	subs.Repositories[repoWithOwner] = repoSubs
+	if err := p.StoreSubscriptions(subs); err != nil {
+		return NewSubscriptionError(InternalServerError, errors.Wrap(err, "could not store subscriptions"))
 	}
 
 	return nil

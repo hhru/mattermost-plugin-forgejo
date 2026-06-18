@@ -6,10 +6,12 @@ import (
 	"crypto/sha1" //nolint:gosec // GitHub webhooks are signed using sha1 https://developer.github.com/webhooks/.
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"html"
 	"io"
 	"net/http"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -35,8 +37,10 @@ const (
 	actionEdited    = "edited"
 	actionCompleted = "completed"
 
-	workflowJobFail    = "failure"
-	workflowJobSuccess = "success"
+	workflowConclusionFailure   = "failure"
+	workflowConclusionSuccess   = "success"
+	workflowConclusionCancelled = "cancelled"
+	workflowConclusionTimedOut  = "timed_out"
 
 	postPropForgejoRepo       = "fg_repo"
 	postPropForgejoObjectID   = "fg_object_id"
@@ -49,16 +53,15 @@ const (
 	forgejoEventHeader                 = "X-Forgejo-Event"
 )
 
-var (
-	eventTypeMapping = map[string]interface{}{
-		"issue_comment":         &FIssueCommentEvent{},
-		"pull_request":          &FPullRequestEvent{},
-		"pull_request_comment":  &FPullRequestReviewCommentEvent{},
-		"pull_request_approved": &FPullRequestReviewEvent{},
-		"pull_request_rejected": &FPullRequestReviewEvent{},
-		"push":                  &FPushEvent{},
-	}
-)
+var eventTypeMapping = map[string]any{
+	"issues":                &FIssuesEvent{},
+	"issue_comment":         &FIssueCommentEvent{},
+	"pull_request":          &FPullRequestEvent{},
+	"pull_request_comment":  &FPullRequestReviewCommentEvent{},
+	"pull_request_approved": &FPullRequestReviewEvent{},
+	"pull_request_rejected": &FPullRequestReviewEvent{},
+	"push":                  &FPushEvent{},
+}
 
 // RenderConfig holds various configuration options to be used in a template
 // for rendering an event.
@@ -69,7 +72,7 @@ type RenderConfig struct {
 // EventWithRenderConfig holds an event along with configuration options for
 // rendering.
 type EventWithRenderConfig struct {
-	Event  interface{}
+	Event  any
 	Config RenderConfig
 	Label  string
 }
@@ -108,7 +111,7 @@ func signBody(secret, body []byte) ([]byte, error) {
 
 // GetEventWithRenderConfig wraps any forgejo Event into an EventWithRenderConfig
 // which also contains per-subscription configuration options.
-func GetEventWithRenderConfig(event interface{}, sub *Subscription) *EventWithRenderConfig {
+func GetEventWithRenderConfig(event any, sub *Subscription) *EventWithRenderConfig {
 	style := ""
 	subscriptionLabel := ""
 	if sub != nil {
@@ -196,10 +199,19 @@ func (wb *WebhookBroker) Close() {
 	}
 }
 
+const maxWebhookPayloadSize = 25 * 1024 * 1024 // 25 MB, matching GitHub's documented maximum
+
 func (p *Plugin) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	config := p.getConfiguration()
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxWebhookPayloadSize)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			http.Error(w, "Request body too large", http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, "Bad request body", http.StatusBadRequest)
 		return
 	}
@@ -207,7 +219,7 @@ func (p *Plugin) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	signature := r.Header.Get("X-Hub-Signature")
 	valid, err := verifyWebhookSignature([]byte(config.WebhookSecret), signature, body)
 	if err != nil {
-		p.client.Log.Warn("Failed to verify webhook signature", "error", err.Error())
+		p.client.Log.Error("Failed to verify webhook signature", "error", err.Error())
 		http.Error(w, "", http.StatusInternalServerError)
 		return
 	}
@@ -219,7 +231,7 @@ func (p *Plugin) handleWebhook(w http.ResponseWriter, r *http.Request) {
 
 	forgejoEventHeader := r.Header.Get(forgejoEventHeader)
 	eventType, ok := eventTypeMapping[forgejoEventHeader]
-	var event interface{}
+	var event any
 	if ok {
 		event = reflect.New(reflect.TypeOf(eventType).Elem()).Interface()
 		r := json.Unmarshal(body, &event)
@@ -263,11 +275,14 @@ func (p *Plugin) handleWebhook(w http.ResponseWriter, r *http.Request) {
 			p.handlePullRequestNotification(event)
 			p.handlePRDescriptionMentionNotification(event)
 		}
-	case *github.IssuesEvent:
-		repo = event.GetRepo()
+	case *FIssuesEvent:
+		// Forgejo's issues payload is not go-github compatible, so it is parsed
+		// into Forgejo-native types and converted before reusing the shared logic.
+		githubIssuesEvent := event.toGitHubIssuesEvent()
+		repo = githubIssuesEvent.GetRepo()
 		handler = func() {
-			p.postIssueEvent(event)
-			p.handleIssueNotification(event)
+			p.postIssueEvent(githubIssuesEvent)
+			p.handleIssueNotification(githubIssuesEvent)
 		}
 	case *FIssueCommentEvent:
 		repo = &github.Repository{
@@ -321,6 +336,11 @@ func (p *Plugin) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		repo = event.GetRepo()
 		handler = func() {
 			p.postWorkflowJobEvent(event)
+		}
+	case *github.WorkflowRunEvent:
+		repo = event.GetRepo()
+		handler = func() {
+			p.postWorkflowRunEvent(event)
 		}
 	case *github.ReleaseEvent:
 		repo = event.GetRepo()
@@ -420,7 +440,7 @@ func (p *Plugin) postPullRequestEvent(event *FPullRequestEvent) {
 
 	pr := *event.PullRequest
 	isPRInDraftState := *pr.Draft
-	//eventLabel := *event.Label.Name
+	// eventLabel := *event.Label.Name
 	labels := make([]string, len(pr.Labels))
 	for i, v := range pr.Labels {
 		labels[i] = *v.Name
@@ -477,7 +497,7 @@ func (p *Plugin) postPullRequestEvent(event *FPullRequestEvent) {
 		post.AddProp(postPropForgejoObjectID, prNumber)
 		post.AddProp(postPropForgejoObjectType, forgejoObjectTypeIssue)
 
-		//if action == actionLabeled {
+		// if action == actionLabeled {
 		//	if label != "" && label == eventLabel {
 		//		pullRequestLabelledMessage, err := renderTemplate("pullRequestLabelled", event)
 		//		if err != nil {
@@ -494,8 +514,12 @@ func (p *Plugin) postPullRequestEvent(event *FPullRequestEvent) {
 		if action == actionOpened {
 			prNotificationType := "newPR"
 			if isPRInDraftState {
+				if !p.configuration.GetNotificationForDraftPRs {
+					return // Draft PR notifications are disabled
+				}
 				prNotificationType = "newDraftPR"
 			}
+
 			newPRMessage, err := renderTemplate(prNotificationType, GetEventWithRenderConfig(event, sub))
 			if err != nil {
 				p.client.Log.Warn("Failed to render template", "error", err.Error())
@@ -515,7 +539,7 @@ func (p *Plugin) postPullRequestEvent(event *FPullRequestEvent) {
 			post.Message = p.sanitizeDescription(reopenedPRMessage)
 		}
 
-		//if action == actionMarkedReadyForReview {
+		// if action == actionMarkedReadyForReview {
 		//	markedReadyToReviewPRMessage, err := renderTemplate("markedReadyToReviewPR", GetEventWithRenderConfig(event, sub))
 		//	if err != nil {
 		//		p.client.Log.Warn("Failed to render template", "error", err.Error())
@@ -531,14 +555,14 @@ func (p *Plugin) postPullRequestEvent(event *FPullRequestEvent) {
 
 		post.ChannelId = sub.ChannelID
 		if err := p.client.Post.CreatePost(post); err != nil {
-			p.client.Log.Warn("Error webhook post", "post", post, "error", err.Error())
+			p.client.Log.Warn("Error webhook post", "channel_id", post.ChannelId, "error", err.Error())
 		}
 	}
 }
 
 func (p *Plugin) sanitizeDescription(description string) string {
 	if strings.Contains(description, "<details>") {
-		var policy = bluemonday.StrictPolicy()
+		policy := bluemonday.StrictPolicy()
 		policy.SkipElementsContent("details")
 		description = html.UnescapeString(policy.Sanitize(description))
 	}
@@ -581,6 +605,10 @@ func (p *Plugin) handlePRDescriptionMentionNotification(event *FPullRequestEvent
 			continue
 		}
 
+		if p.senderMutedByReceiver(userID, event.GetSender().GetLogin()) {
+			continue
+		}
+
 		channel, err := p.client.Channel.GetDirect(userID, p.BotUserID)
 		if err != nil {
 			continue
@@ -590,7 +618,7 @@ func (p *Plugin) handlePRDescriptionMentionNotification(event *FPullRequestEvent
 		post.ChannelId = channel.Id
 
 		if err = p.client.Post.CreatePost(post); err != nil {
-			p.client.Log.Warn("Error webhook post", "post", post, "error", err.Error())
+			p.client.Log.Warn("Error webhook post", "channel_id", post.ChannelId, "error", err.Error())
 		}
 
 		p.sendRefreshEvent(userID)
@@ -687,7 +715,7 @@ func (p *Plugin) postIssueEvent(event *github.IssuesEvent) {
 
 		post.ChannelId = sub.ChannelID
 		if err = p.client.Post.CreatePost(post); err != nil {
-			p.client.Log.Warn("Error webhook post", "post", post, "error", err.Error())
+			p.client.Log.Warn("Error webhook post", "channel_id", post.ChannelId, "error", err.Error())
 		}
 	}
 }
@@ -726,7 +754,7 @@ func (p *Plugin) postPushEvent(event *FPushEvent) {
 
 		post.ChannelId = sub.ChannelID
 		if err = p.client.Post.CreatePost(post); err != nil {
-			p.client.Log.Warn("Error webhook post", "post", post, "error", err.Error())
+			p.client.Log.Warn("Error webhook post", "channel_id", post.ChannelId, "error", err.Error())
 		}
 	}
 }
@@ -763,7 +791,7 @@ func (p *Plugin) postCreateEvent(event *github.CreateEvent) {
 
 		post.ChannelId = sub.ChannelID
 		if err = p.client.Post.CreatePost(post); err != nil {
-			p.client.Log.Warn("Error webhook post", "post", post, "error", err.Error())
+			p.client.Log.Warn("Error webhook post", "channel_id", post.ChannelId, "error", err.Error())
 		}
 	}
 }
@@ -801,7 +829,7 @@ func (p *Plugin) postDeleteEvent(event *github.DeleteEvent) {
 		post := p.makeBotPost(newDeleteMessage, "custom_git_delete")
 		post.ChannelId = sub.ChannelID
 		if err = p.client.Post.CreatePost(post); err != nil {
-			p.client.Log.Warn("Error webhook post", "post", post, "error", err.Error())
+			p.client.Log.Warn("Error webhook post", "channel_id", post.ChannelId, "error", err.Error())
 		}
 	}
 }
@@ -868,7 +896,7 @@ func (p *Plugin) postIssueCommentEvent(event *FIssueCommentEvent) {
 		post.ChannelId = sub.ChannelID
 
 		if err = p.client.Post.CreatePost(post); err != nil {
-			p.client.Log.Warn("Error webhook post", "post", post, "error", err.Error())
+			p.client.Log.Warn("Error webhook post", "channel_id", post.ChannelId, "error", err.Error())
 		}
 	}
 }
@@ -882,7 +910,16 @@ func (p *Plugin) senderMutedByReceiver(userID string, sender string) bool {
 	}
 
 	mutedUsernames := string(mutedUsernameBytes)
-	return strings.Contains(mutedUsernames, sender)
+	if len(mutedUsernames) == 0 {
+		return false
+	}
+	senderLower := strings.ToLower(sender)
+	for muted := range strings.SplitSeq(mutedUsernames, ",") {
+		if strings.ToLower(muted) == senderLower {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *Plugin) postPullRequestReviewEvent(event *FPullRequestReviewEvent) {
@@ -946,7 +983,7 @@ func (p *Plugin) postPullRequestReviewEvent(event *FPullRequestReviewEvent) {
 
 		post.ChannelId = sub.ChannelID
 		if err = p.client.Post.CreatePost(post); err != nil {
-			p.client.Log.Warn("Error webhook post", "post", post, "error", err.Error())
+			p.client.Log.Warn("Error webhook post", "channel_id", post.ChannelId, "error", err.Error())
 		}
 	}
 }
@@ -959,7 +996,7 @@ func (p *Plugin) postPullRequestReviewCommentEvent(event *FPullRequestReviewComm
 		return
 	}
 
-	newReviewMessage, err := renderTemplate("newReviewComment", event)
+	message, err := renderTemplate("newReviewComment", event)
 	if err != nil {
 		p.client.Log.Warn("Failed to render template", "error", err.Error())
 		return
@@ -992,7 +1029,7 @@ func (p *Plugin) postPullRequestReviewCommentEvent(event *FPullRequestReviewComm
 			continue
 		}
 
-		post := p.makeBotPost(newReviewMessage, "custom_git_pr_comment")
+		post := p.makeBotPost(message, "custom_git_pr_comment")
 
 		repoName := strings.ToLower(*repo.FullName)
 		commentID := *event.PullRequest.ID
@@ -1003,7 +1040,7 @@ func (p *Plugin) postPullRequestReviewCommentEvent(event *FPullRequestReviewComm
 
 		post.ChannelId = sub.ChannelID
 		if err = p.client.Post.CreatePost(post); err != nil {
-			p.client.Log.Warn("Error webhook post", "post", post, "error", err.Error())
+			p.client.Log.Warn("Error webhook post", "channel_id", post.ChannelId, "error", err.Error())
 		}
 	}
 }
@@ -1061,6 +1098,10 @@ func (p *Plugin) handleCommentMentionNotification(event *FIssueCommentEvent) {
 		}
 
 		if *event.Repo.Private && !p.permissionToRepo(userID, *event.Repo.FullName) {
+			continue
+		}
+
+		if p.senderMutedByReceiver(userID, event.GetSender().GetLogin()) {
 			continue
 		}
 
@@ -1156,14 +1197,8 @@ func (p *Plugin) handleCommentAssigneeNotification(event *FIssueCommentEvent) {
 	mentionedUsernames := parseForgejoUsernamesFromText(*event.Comment.Body)
 
 	for _, assignee := range assignees {
-		usernameMentioned := false
 		template := templateName
-		for _, username := range mentionedUsernames {
-			if username == *assignee.Login {
-				usernameMentioned = true
-				break
-			}
-		}
+		usernameMentioned := slices.Contains(mentionedUsernames, *assignee.Login)
 
 		if usernameMentioned {
 			switch eventType {
@@ -1267,12 +1302,12 @@ func (p *Plugin) handlePullRequestNotification(event *FPullRequestEvent) {
 		return
 	}
 
-	if len(requestedUserID) > 0 {
+	if len(requestedUserID) > 0 && !p.senderMutedByReceiver(requestedUserID, sender) {
 		p.CreateBotDMPost(requestedUserID, message, "custom_git_review_request")
 		p.sendRefreshEvent(requestedUserID)
 	}
 
-	p.postIssueNotification(message, authorUserID, assigneeUserID)
+	p.postIssueNotification(message, sender, authorUserID, assigneeUserID)
 }
 
 func (p *Plugin) ignoreRequestedReview(event *FPullRequestEvent, requestedUserID string) bool {
@@ -1301,12 +1336,7 @@ func (p *Plugin) ignoreRequestedReview(event *FPullRequestEvent, requestedUserID
 		return false
 	}
 	currentRepo := *event.Repo.FullName
-	for _, excludedRepo := range excludedRepos {
-		if excludedRepo == currentRepo {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(excludedRepos, currentRepo)
 }
 
 func (p *Plugin) handleIssueNotification(event *github.IssuesEvent) {
@@ -1353,16 +1383,16 @@ func (p *Plugin) handleIssueNotification(event *github.IssuesEvent) {
 		return
 	}
 
-	p.postIssueNotification(message, authorUserID, assigneeUserID)
+	p.postIssueNotification(message, sender, authorUserID, assigneeUserID)
 }
 
-func (p *Plugin) postIssueNotification(message, authorUserID, assigneeUserID string) {
-	if len(authorUserID) > 0 {
+func (p *Plugin) postIssueNotification(message, sender, authorUserID, assigneeUserID string) {
+	if len(authorUserID) > 0 && !p.senderMutedByReceiver(authorUserID, sender) {
 		p.CreateBotDMPost(authorUserID, message, "custom_git_author")
 		p.sendRefreshEvent(authorUserID)
 	}
 
-	if len(assigneeUserID) > 0 {
+	if len(assigneeUserID) > 0 && !p.senderMutedByReceiver(assigneeUserID, sender) {
 		p.CreateBotDMPost(assigneeUserID, message, "custom_git_assigned")
 		p.sendRefreshEvent(assigneeUserID)
 	}
@@ -1374,8 +1404,8 @@ func (p *Plugin) handlePullRequestReviewNotification(event *FPullRequestReviewEv
 		return
 	}
 
-	//there is no such action in forgejo
-	//if *event.Action != actionSubmitted {
+	// there is no such action in forgejo
+	// if *event.Action != actionSubmitted {
 	//	return
 	//}
 
@@ -1385,6 +1415,10 @@ func (p *Plugin) handlePullRequestReviewNotification(event *FPullRequestReviewEv
 	}
 
 	if *event.Repo.Private && !p.permissionToRepo(authorUserID, *event.Repo.FullName) {
+		return
+	}
+
+	if p.senderMutedByReceiver(authorUserID, event.GetSender().GetLogin()) {
 		return
 	}
 
@@ -1426,7 +1460,7 @@ func (p *Plugin) postStarEvent(event *github.StarEvent) {
 
 		post.ChannelId = sub.ChannelID
 		if err = p.client.Post.CreatePost(post); err != nil {
-			p.client.Log.Warn("Error webhook post", "post", post, "error", err.Error())
+			p.client.Log.Warn("Error webhook post", "channel_id", post.ChannelId, "error", err.Error())
 		}
 	}
 }
@@ -1436,8 +1470,7 @@ func (p *Plugin) postWorkflowJobEvent(event *github.WorkflowJobEvent) {
 		return
 	}
 
-	// Create a post only when the workflow job is completed and has either failed or succeeded
-	if event.GetWorkflowJob().GetConclusion() != workflowJobFail && event.GetWorkflowJob().GetConclusion() != workflowJobSuccess {
+	if event.GetWorkflowJob().GetConclusion() != workflowConclusionFailure && event.GetWorkflowJob().GetConclusion() != workflowConclusionSuccess {
 		return
 	}
 
@@ -1467,7 +1500,56 @@ func (p *Plugin) postWorkflowJobEvent(event *github.WorkflowJobEvent) {
 		}
 
 		if err = p.client.Post.CreatePost(post); err != nil {
-			p.client.Log.Warn("Error webhook post", "Post", post, "Error", err.Error())
+			p.client.Log.Warn("Error webhook post", "channel_id", post.ChannelId, "error", err.Error())
+		}
+	}
+}
+
+func (p *Plugin) postWorkflowRunEvent(event *github.WorkflowRunEvent) {
+	if event.GetAction() != actionCompleted {
+		return
+	}
+
+	conclusion := event.GetWorkflowRun().GetConclusion()
+	isSuccess := conclusion == workflowConclusionSuccess
+	isFailure := conclusion == workflowConclusionFailure ||
+		conclusion == workflowConclusionCancelled ||
+		conclusion == workflowConclusionTimedOut
+
+	if !isSuccess && !isFailure {
+		return
+	}
+
+	repo := event.GetRepo()
+	subs := p.GetSubscribedChannelsForRepository(repo.GetFullName(), repo.GetPrivate())
+	if len(subs) == 0 {
+		return
+	}
+
+	workflowRunMessage, err := renderTemplate("workflowRunCompleted", event)
+	if err != nil {
+		p.client.Log.Warn("Failed to render template", "Error", err.Error())
+		return
+	}
+
+	for _, sub := range subs {
+		if (isFailure && !sub.WorkflowRunFailures()) || (isSuccess && !sub.WorkflowRunSuccesses()) {
+			continue
+		}
+
+		if p.excludeConfigOrgMember(event.GetSender().GetLogin(), sub) {
+			continue
+		}
+
+		post := &model.Post{
+			UserId:    p.BotUserID,
+			Type:      "custom_git_workflow_run",
+			Message:   workflowRunMessage,
+			ChannelId: sub.ChannelID,
+		}
+
+		if err = p.client.Post.CreatePost(post); err != nil {
+			p.client.Log.Warn("Error webhook post", "channel_id", post.ChannelId, "error", err.Error())
 		}
 	}
 }
@@ -1511,7 +1593,7 @@ func (p *Plugin) postReleaseEvent(event *github.ReleaseEvent) {
 		}
 
 		if err = p.client.Post.CreatePost(post); err != nil {
-			p.client.Log.Warn("Error webhook post", "Post", post, "Error", err.Error())
+			p.client.Log.Warn("Error webhook post", "channel_id", post.ChannelId, "error", err.Error())
 		}
 	}
 }
@@ -1549,7 +1631,7 @@ func (p *Plugin) postDiscussionEvent(event *github.DiscussionEvent) {
 		post.AddProp(postPropForgejoObjectType, "discussion")
 		post.ChannelId = sub.ChannelID
 		if err = p.client.Post.CreatePost(post); err != nil {
-			p.client.Log.Warn("Error creating discussion notification post", "Post", post, "Error", err.Error())
+			p.client.Log.Warn("Error creating discussion notification post", "channel_id", post.ChannelId, "error", err.Error())
 		}
 	}
 }
@@ -1591,7 +1673,7 @@ func (p *Plugin) postDiscussionCommentEvent(event *github.DiscussionCommentEvent
 
 		post.ChannelId = sub.ChannelID
 		if err = p.client.Post.CreatePost(post); err != nil {
-			p.client.Log.Warn("Error creating discussion comment post", "Post", post, "Error", err.Error())
+			p.client.Log.Warn("Error creating discussion comment post", "channel_id", post.ChannelId, "error", err.Error())
 		}
 	}
 }

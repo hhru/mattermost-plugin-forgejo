@@ -4,22 +4,31 @@
 import {connect} from 'react-redux';
 import {bindActionCreators} from 'redux';
 
-import manifest from 'manifest';
-import {getRepos} from '../../actions';
+import {getCurrentChannelId} from 'mattermost-redux/selectors/entities/channels';
+
+import manifest from '@/manifest';
+
+import {getReposByOrg, getOrgs} from '../../actions';
 
 import ForgejoRepoSelector from './forgejo_repo_selector.jsx';
 
 function mapStateToProps(state) {
     return {
-        yourRepos: state[`plugins-${manifest.id}`].yourRepos,
+        yourOrgs: state[`plugins-${manifest.id}`].yourOrgs,
+        yourReposByOrg: state[`plugins-${manifest.id}`].yourReposByOrg,
+        currentChannelId: getCurrentChannelId(state),
     };
 }
 
 function mapDispatchToProps(dispatch) {
     return {
-        actions: bindActionCreators({
-            getRepos,
-        }, dispatch),
+        actions: bindActionCreators(
+            {
+                getOrgs,
+                getReposByOrg,
+            },
+            dispatch,
+        ),
     };
 }
 

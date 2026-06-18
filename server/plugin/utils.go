@@ -28,10 +28,19 @@ func pad(src []byte) []byte {
 
 func unpad(src []byte) ([]byte, error) {
 	length := len(src)
-	unpadding := int(src[length-1])
+	if length == 0 {
+		return nil, errors.New("unpad error: empty input")
+	}
 
-	if unpadding > length {
+	unpadding := int(src[length-1])
+	if unpadding < 1 || unpadding > aes.BlockSize || unpadding > length {
 		return nil, errors.New("unpad error. This could happen when incorrect encryption key is used")
+	}
+
+	for i := length - unpadding; i < length; i++ {
+		if src[i] != byte(unpadding) {
+			return nil, errors.New("unpad error. This could happen when incorrect encryption key is used")
+		}
 	}
 
 	return src[:(length - unpadding)], nil
@@ -50,7 +59,7 @@ func encrypt(key []byte, text string) (string, error) {
 		return "", errors.Wrap(err, "readFull was unsuccessful, check buffer size")
 	}
 
-	cfb := cipher.NewCFBEncrypter(block, iv)
+	cfb := cipher.NewCFBEncrypter(block, iv) //nolint:staticcheck // SA1019: changing encryption would be a breaking change
 	cfb.XORKeyStream(ciphertext[aes.BlockSize:], msg)
 	finalMsg := base64.URLEncoding.EncodeToString(ciphertext)
 	return finalMsg, nil
@@ -74,7 +83,7 @@ func decrypt(key []byte, text string) (string, error) {
 	iv := decodedMsg[:aes.BlockSize]
 	msg := decodedMsg[aes.BlockSize:]
 
-	cfb := cipher.NewCFBDecrypter(block, iv)
+	cfb := cipher.NewCFBDecrypter(block, iv) //nolint:staticcheck // SA1019: changing encryption would be a breaking change
 	cfb.XORKeyStream(msg, msg)
 
 	unpadMsg, err := unpad(msg)
@@ -104,7 +113,7 @@ func parseForgejoUsernamesFromText(text string) []string {
 	usernames := []string{}
 
 	for _, word := range strings.FieldsFunc(text, func(c rune) bool {
-		return !(c == '-' || c == '@' || c == '.' || unicode.IsLetter(c) || unicode.IsNumber(c))
+		return c != '-' && c != '@' && c != '.' && !unicode.IsLetter(c) && !unicode.IsNumber(c)
 	}) {
 		word = strings.Trim(word, ".")
 		if len(word) < 2 || word[0] != '@' {
@@ -157,16 +166,6 @@ func isFlag(text string) bool {
 
 func parseFlag(flag string) string {
 	return strings.TrimPrefix(flag, "--")
-}
-
-func containsValue(arr []string, value string) bool {
-	for _, element := range arr {
-		if element == value {
-			return true
-		}
-	}
-
-	return false
 }
 
 // filterLines filters lines in a string from start to end.
