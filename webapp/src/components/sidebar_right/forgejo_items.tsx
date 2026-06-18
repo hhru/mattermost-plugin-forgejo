@@ -53,6 +53,17 @@ function ForgejoItems(props: ForgejoItemsProps) {
             userName = item.owner.login;
         }
 
+        // Link the username to the Forgejo instance the item lives on, derived
+        // from the item's own html_url, instead of a hardcoded github.com host.
+        let userUrl = '';
+        if (userName && item.html_url) {
+            try {
+                userUrl = `${new URL(item.html_url).origin}/${userName}`;
+            } catch {
+                userUrl = '';
+            }
+        }
+
         let number: JSX.Element | null = null;
         if (item.number) {
             const iconProps: IconProps = {
@@ -287,13 +298,15 @@ function ForgejoItems(props: ForgejoItemsProps) {
                     {userName && (
                         <>
                             {' by '}
-                            <a
-                                href={`https://github.com/${userName}`}
-                                target='_blank'
-                                rel='noopener noreferrer'
-                            >
-                                {userName}
-                            </a>
+                            {userUrl ? (
+                                <a
+                                    href={userUrl}
+                                    target='_blank'
+                                    rel='noopener noreferrer'
+                                >
+                                    {userName}
+                                </a>
+                            ) : userName}
                         </>
                     )}
                     {(item.created_at || userName) && '.'}
