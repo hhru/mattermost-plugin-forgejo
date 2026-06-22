@@ -183,18 +183,110 @@ func (p *Plugin) GetGitHubClient(ctx context.Context, userID string) (*github.Cl
 }
 
 func (p *Plugin) githubConnectUser(_ context.Context, info *ForgejoUserInfo) *github.Client {
-	tok := *info.Token
-	return p.githubConnectToken(tok)
+	httpClient, err := p.oauthClient(info)
+	if err != nil {
+		p.client.Log.Warn("Failed to build authenticated Forgejo client", "error", err.Error())
+		return nil
+	}
+	client, err := getGitHubClient(httpClient, p.getConfiguration())
+	if err != nil {
+		p.client.Log.Warn("Failed to wrap Forgejo API client", "error", err.Error())
+		return nil
+	}
+	return client
 }
 
 func (p *Plugin) forgejoConnect(info *ForgejoUserInfo) *http.Client {
-	config, err := p.getOAuthConfig()
+	client, err := p.oauthClient(info)
 	if err != nil {
 		p.client.Log.Error("Failed to create OAuth config", "error", err.Error())
 		return nil
 	}
+	return client
+}
+
+// oauthClient is the single place every user-authenticated Forgejo client is
+// built, so refreshed tokens are persisted uniformly (see persistingTokenSource).
+func (p *Plugin) oauthClient(info *ForgejoUserInfo) (*http.Client, error) {
+	config, err := getOauthConfig(p.getConfiguration())
+	if err != nil {
+		return nil, err
+	}
 	tok := *info.Token
-	return config.Client(context.Background(), &tok)
+	src := &persistingTokenSource{
+		base:   config.TokenSource(context.Background(), &tok),
+		plugin: p,
+		userID: info.UserID,
+		seen:   tok.AccessToken,
+	}
+	return oauth2.NewClient(context.Background(), src), nil
+}
+
+// persistingTokenSource persists rotated tokens back to the KV store.
+// Forgejo rotates refresh tokens: each refresh invalidates the previous grant,
+// so a refreshed pair that isn't stored makes the next refresh fail with
+// "invalid_grant". It writes back only when base.Token() returns a new access
+// token, so a still-valid token costs no write.
+type persistingTokenSource struct {
+	base   oauth2.TokenSource
+	plugin *Plugin
+	userID string
+
+	mu   sync.Mutex
+	seen string // last access token already persisted/observed
+}
+
+func (s *persistingTokenSource) Token() (*oauth2.Token, error) {
+	tok, err := s.base.Token()
+	if err != nil {
+		return nil, err
+	}
+
+	s.mu.Lock()
+	rotated := tok.AccessToken != s.seen
+	if rotated {
+		s.seen = tok.AccessToken
+	}
+	s.mu.Unlock()
+
+	if rotated {
+		if err := s.plugin.persistRefreshedToken(s.userID, tok); err != nil {
+			// Best-effort: this request still proceeds with the fresh token.
+			s.plugin.client.Log.Warn("Failed to persist refreshed Forgejo token",
+				"user_id", s.userID, "error", err.Error())
+		}
+	}
+
+	return tok, nil
+}
+
+// persistRefreshedToken stores a freshly refreshed (and still plaintext) token
+// for a user, updating only the Token field of the stored record so concurrent
+// updates to other fields (settings, reminders, etc.) are not clobbered.
+func (p *Plugin) persistRefreshedToken(userID string, tok *oauth2.Token) error {
+	encAccess, encRefresh, err := p.encryptTokens(tok)
+	if err != nil {
+		return err
+	}
+
+	return p.store.SetAtomicWithRetries(userID+forgejoTokenKey, func(oldValue []byte) (any, error) {
+		if oldValue == nil {
+			return nil, errors.New("user info not found while persisting refreshed token")
+		}
+		var info ForgejoUserInfo
+		if err := json.Unmarshal(oldValue, &info); err != nil {
+			return nil, errors.Wrap(err, "could not unmarshal stored user info")
+		}
+
+		// Carry over token metadata (Expiry, TokenType) from the refreshed token
+		// and overwrite with the encrypted credentials.
+		newTok := *tok
+		newTok.AccessToken = encAccess
+		newTok.RefreshToken = encRefresh
+		info.Token = &newTok
+
+		return &info, nil
+	})
 }
 
 func (p *Plugin) githubConnectToken(token oauth2.Token) *github.Client {
@@ -209,6 +301,9 @@ func (p *Plugin) githubConnectToken(token oauth2.Token) *github.Client {
 	return client
 }
 
+// GetGitHubClient builds a client from a raw token and does NOT persist rotated
+// tokens; use it only with a freshly minted token (e.g. right after the code
+// exchange). For stored user tokens use githubConnectUser/forgejoConnect.
 func GetGitHubClient(token oauth2.Token, config *Configuration) (*github.Client, error) {
 	oauthConfig, err := getOauthConfig(config)
 	if err != nil {
@@ -580,20 +675,31 @@ type UserSettings struct {
 	ExcludeTeamReviewNotifications []string `json:"exclude_team_review_notifications"`
 }
 
+// encryptTokens encrypts an OAuth token's access and refresh credentials with
+// the configured encryption key, returning the ciphertext for each.
+func (p *Plugin) encryptTokens(tok *oauth2.Token) (encAccess, encRefresh string, err error) {
+	key := []byte(p.getConfiguration().EncryptionKey)
+
+	encAccess, err = encrypt(key, tok.AccessToken)
+	if err != nil {
+		return "", "", errors.Wrap(err, "error occurred while encrypting access token")
+	}
+	encRefresh, err = encrypt(key, tok.RefreshToken)
+	if err != nil {
+		return "", "", errors.Wrap(err, "error occurred while encrypting refresh token")
+	}
+
+	return encAccess, encRefresh, nil
+}
+
 func (p *Plugin) storeGitHubUserInfo(info *ForgejoUserInfo) error {
-	config := p.getConfiguration()
-
-	encryptedAccessToken, accessErr := encrypt([]byte(config.EncryptionKey), info.Token.AccessToken)
-	if accessErr != nil {
-		return errors.Wrap(accessErr, "error occurred while encrypting access token")
-	}
-	encryptedRefreshToken, refreshErr := encrypt([]byte(config.EncryptionKey), info.Token.RefreshToken)
-	if refreshErr != nil {
-		return errors.Wrap(refreshErr, "error occurred while encrypting refresh token")
+	encAccess, encRefresh, err := p.encryptTokens(info.Token)
+	if err != nil {
+		return err
 	}
 
-	info.Token.AccessToken = encryptedAccessToken
-	info.Token.RefreshToken = encryptedRefreshToken
+	info.Token.AccessToken = encAccess
+	info.Token.RefreshToken = encRefresh
 
 	if _, err := p.store.Set(info.UserID+forgejoTokenKey, info); err != nil {
 		return errors.Wrap(err, "error occurred while trying to store user info into KV store")
