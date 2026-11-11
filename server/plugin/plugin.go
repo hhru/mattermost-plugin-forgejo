@@ -11,7 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"unicode/utf8"
+	"time"
 
 	"github.com/google/go-github/v54/github"
 	"github.com/gorilla/mux"
@@ -823,24 +823,6 @@ func (p *Plugin) disconnectGitHubAccount(userID string) {
 	)
 }
 
-func (p *Plugin) useGitHubClient(info *ForgejoUserInfo, toRun func(info *ForgejoUserInfo, token *oauth2.Token) error) error {
-	err := toRun(info, info.Token)
-	if err != nil {
-		p.client.Log.Warn("Error occurred while using the Forgejo client", "error", err.Error())
-	}
-
-	if err != nil && strings.Contains(err.Error(), invalidTokenError) {
-		p.handleRevokedToken(info)
-	}
-
-	return err
-}
-
-func (p *Plugin) handleRevokedToken(info *ForgejoUserInfo) {
-	p.disconnectGitHubAccount(info.UserID)
-	p.CreateBotDMPost(info.UserID, "Your Forgejo account was disconnected due to an invalid or revoked authorization token. Reconnect your account using the `/forgejo connect` command.", "custom_git_revoked_token")
-}
-
 // reEncryptUserData re-encrypts all connected users' tokens when the encryption
 // key changes. Users whose tokens cannot be migrated are force-disconnected and
 // notified to reconnect. A cluster mutex ensures only one node performs the
@@ -1037,17 +1019,7 @@ func (p *Plugin) CreateBotDMPost(userID, message, postType string) {
 
 func truncatePostMessage(message string) string {
 	const truncationMarker = "\n\n_… message truncated_"
-
-	if utf8.RuneCountInString(message) <= model.PostMessageMaxRunesV2 {
-		return message
-	}
-
-	keep := model.PostMessageMaxRunesV2 - utf8.RuneCountInString(truncationMarker)
-	if keep <= 0 {
-		return string([]rune(truncationMarker)[:model.PostMessageMaxRunesV2])
-	}
-
-	return string([]rune(message)[:keep]) + truncationMarker
+	return truncateMessageAtRunes(message, model.PostMessageMaxRunesV2, truncationMarker)
 }
 
 func (p *Plugin) CheckIfDuplicateDailySummary(userID, text string) (bool, error) {
@@ -1334,4 +1306,140 @@ func (p *Plugin) getUsername(mmUserID string) (string, error) {
 	}
 
 	return "@" + info.ForgejoUsername, nil
+}
+
+func (p *Plugin) useGitHubClient(info *ForgejoUserInfo, toRun func(info *ForgejoUserInfo, token *oauth2.Token) error) error {
+	err := toRun(info, info.Token)
+	if err != nil {
+		p.client.Log.Warn("Error occurred while using the Forgejo client", "error", err.Error())
+	}
+
+	if isGitHubAuthFailure(err) {
+		p.handleAuthFailure(info, err)
+	}
+
+	return err
+}
+
+// isGitHubAuthFailure reports whether err indicates the stored OAuth token is no
+// longer usable: a 401, or a 403 from SAML SSO enforcement.
+//
+// We use two detection paths because the plugin talks to GitHub through both the
+// REST client (go-github) and the GraphQL client (githubv4), and they surface
+// errors differently.
+func isGitHubAuthFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	// REST API: go-github returns a typed *github.ErrorResponse with the HTTP status.
+	var ghErr *github.ErrorResponse
+	if errors.As(err, &ghErr) && ghErr.Response != nil {
+		switch ghErr.Response.StatusCode {
+		case http.StatusUnauthorized:
+			return true
+		case http.StatusForbidden:
+			// Not every 403 is an auth failure; only SAML SSO revocation requires reconnect.
+			return isSAMLError(ghErr)
+		}
+	}
+
+	// GraphQL API: githubv4 returns untyped errors with status and message embedded
+	// in err.Error(), so match on known substrings instead.
+	errMsg := err.Error()
+	if strings.Contains(errMsg, invalidTokenError) {
+		return true
+	}
+	if strings.Contains(errMsg, "non-200 OK status code: 401") {
+		return true
+	}
+	// Match SAML content, not bare 403 — unrelated permission errors also return 403.
+	return strings.Contains(errMsg, "SAML enforcement") || strings.Contains(errMsg, "saml_failure")
+}
+
+func preferAuthErr(existing, candidate error) error {
+	if existing == nil {
+		return candidate
+	}
+	if candidate == nil {
+		return existing
+	}
+	if isGitHubAuthFailure(candidate) && !isGitHubAuthFailure(existing) {
+		return candidate
+	}
+	return existing
+}
+
+func isSAMLError(ghErr *github.ErrorResponse) bool {
+	if ghErr.Response.Header.Get("X-GitHub-SSO") != "" {
+		return true
+	}
+	if strings.Contains(ghErr.Message, "SAML") {
+		return true
+	}
+	for _, e := range ghErr.Errors {
+		if strings.Contains(e.Message, "SAML") {
+			return true
+		}
+	}
+	return false
+}
+
+func (p *Plugin) handleRevokedToken(info *ForgejoUserInfo) {
+	p.disconnectGitHubAccount(info.UserID)
+	p.CreateBotDMPost(info.UserID, "Your Forgejo account was disconnected due to an invalid or revoked authorization token. Reconnect your account using the `/forgejo connect` command.", "custom_git_revoked_token")
+}
+
+const (
+	authFailureDMKey      = "auth_failure_dm_"
+	authFailureDMCooldown = time.Hour
+)
+
+func (p *Plugin) handleAuthFailure(info *ForgejoUserInfo, err error) {
+	if ssoURL := extractSSOAuthorizeURL(err); ssoURL != "" {
+		p.dmSAMLReauthorize(info, ssoURL)
+		return
+	}
+	p.handleRevokedToken(info)
+}
+
+func (p *Plugin) dmSAMLReauthorize(info *ForgejoUserInfo, ssoURL string) {
+	// Throttle only DM once per cooldown window per user.
+	ok, err := p.store.Set(authFailureDMKey+info.UserID, []byte("1"),
+		pluginapi.SetExpiry(authFailureDMCooldown),
+		pluginapi.SetAtomic(nil),
+	)
+	if err != nil {
+		p.client.Log.Warn("Failed to set SAML reauthorize DM cooldown", "error", err.Error())
+	}
+	if !ok {
+		return
+	}
+	msg := fmt.Sprintf(
+		"Your GitHub SAML SSO session expired, so GitHub temporarily blocked this plugin from acting on your behalf. "+
+			"Re-authorize SSO for your organization here: %s\n\n"+
+			"You do not need to run `/github connect` again — once SSO is re-authorized, this account will keep working.",
+		ssoURL,
+	)
+	p.CreateBotDMPost(info.UserID, msg, "custom_git_saml_reauth")
+}
+
+// extractSSOAuthorizeURL pulls the SSO reauthorization url that GitHub
+// includes in the X-GitHub-SSO header on SAML enforced 403 responses
+func extractSSOAuthorizeURL(err error) string {
+	var ghErr *github.ErrorResponse
+	if !errors.As(err, &ghErr) || ghErr.Response == nil {
+		return ""
+	}
+	header := ghErr.Response.Header.Get("X-GitHub-SSO")
+	if header == "" {
+		return ""
+	}
+	for part := range strings.SplitSeq(header, ";") {
+		part = strings.TrimSpace(part)
+		if u, ok := strings.CutPrefix(part, "url="); ok {
+			return strings.TrimSpace(u)
+		}
+	}
+	return ""
 }

@@ -17,6 +17,7 @@ export default class SidebarButtons extends React.PureComponent {
         baseURL: PropTypes.string,
         reviews: PropTypes.arrayOf(PropTypes.object),
         reviewTargetDays: PropTypes.number,
+        reviewTargetDayType: PropTypes.string,
         unreads: PropTypes.arrayOf(PropTypes.object),
         yourPrs: PropTypes.arrayOf(PropTypes.object),
         yourAssignments: PropTypes.arrayOf(PropTypes.object),
@@ -35,9 +36,13 @@ export default class SidebarButtons extends React.PureComponent {
         this.state = {
             refreshing: false,
         };
+        this.mounted = false;
+        this.refreshing = false;
     }
 
     componentDidMount() {
+        this.mounted = true;
+
         if (this.props.connected) {
             this.getData();
             return;
@@ -52,8 +57,16 @@ export default class SidebarButtons extends React.PureComponent {
         }
     }
 
+    componentWillUnmount() {
+        this.mounted = false;
+    }
+
     getData = async (e) => {
-        if (this.state.refreshing) {
+        if (e) {
+            e.preventDefault();
+        }
+
+        if (this.refreshing) {
             return;
         }
 
@@ -66,13 +79,16 @@ export default class SidebarButtons extends React.PureComponent {
             return;
         }
 
-        if (e) {
-            e.preventDefault();
-        }
-
+        this.refreshing = true;
         this.setState({refreshing: true});
-        await this.props.actions.getSidebarContent();
-        this.setState({refreshing: false});
+        try {
+            await this.props.actions.getSidebarContent();
+        } finally {
+            this.refreshing = false;
+            if (this.mounted) {
+                this.setState({refreshing: false});
+            }
+        }
     };
 
     openConnectWindow = (e) => {
@@ -83,6 +99,7 @@ export default class SidebarButtons extends React.PureComponent {
     openRHS = (rhsState) => {
         this.props.actions.updateRhsState(rhsState);
         this.props.showRHSPlugin();
+        this.getData();
     };
 
     render() {
@@ -121,6 +138,7 @@ export default class SidebarButtons extends React.PureComponent {
 
         const reviews = this.props.reviews || [];
         const reviewTargetDays = this.props.reviewTargetDays || 0;
+        const reviewTargetDayType = this.props.reviewTargetDayType || 'calendar';
         const yourPrs = this.props.yourPrs || [];
         const unreads = this.props.unreads || [];
         const yourAssignments = this.props.yourAssignments || [];
@@ -162,7 +180,7 @@ export default class SidebarButtons extends React.PureComponent {
                 >
                     <a
                         onClick={() => this.openRHS(RHSStates.REVIEWS)}
-                        style={reviewButtonStyle(button, reviews, reviewTargetDays)}
+                        style={reviewButtonStyle(button, reviews, reviewTargetDays, reviewTargetDayType)}
                     >
                         <i className='fa fa-code-fork'/>
                         {' ' + reviews.length}
@@ -212,7 +230,7 @@ export default class SidebarButtons extends React.PureComponent {
     }
 }
 
-function reviewButtonStyle(base, reviews, targetDays) {
+function reviewButtonStyle(base, reviews, targetDays, dayType) {
     // Match getReviewSLAStatus / reviewsHaveOverdue: a non-positive target means SLA
     // is not configured. !targetDays alone would let a negative value through and
     // produce a misleading green indicator.
@@ -223,7 +241,7 @@ function reviewButtonStyle(base, reviews, targetDays) {
     if (list.length === 0) {
         return base;
     }
-    if (reviewsHaveOverdue(list, targetDays)) {
+    if (reviewsHaveOverdue(list, targetDays, dayType || 'calendar')) {
         return {...base, color: 'var(--dnd-indicator)'};
     }
     return {...base, color: 'var(--online-indicator)'};
@@ -250,7 +268,12 @@ const getStyle = makeStyleFromTheme((theme) => {
             justifyContent: 'space-around',
             padding: '0 10px',
         },
+
+        // OverlayTrigger may wrap each button, so stack the controls at the
+        // container level instead of relying on the anchors' display style.
         containerTeam: {
+            display: 'flex',
+            flexDirection: 'column',
         },
     };
 });

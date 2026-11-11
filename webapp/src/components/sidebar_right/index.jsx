@@ -4,14 +4,14 @@
 import {connect} from 'react-redux';
 import {bindActionCreators} from 'redux';
 
-import {getReviewsDetails, getYourPrsDetails} from '../../actions';
+import {getReviewsDetails, getYourPrsDetails, getSidebarContent} from '../../actions';
 
 import {getSidebarData} from 'src/selectors';
 
 import SidebarRight from './sidebar_right.jsx';
 
 function mapStateToProps(state) {
-    const {username, reviews, yourPrs, yourAssignments, unreads, baseURL, orgs, rhsState} = getSidebarData(state);
+    const {username, reviews, yourPrs, yourAssignments, unreads, baseURL, orgs, rhsState, reviewTargetDays, reviewTargetDayType} = getSidebarData(state);
     return {
         username,
         reviews,
@@ -21,6 +21,8 @@ function mapStateToProps(state) {
         baseURL,
         orgs,
         rhsState,
+        reviewTargetDays,
+        reviewTargetDayType,
     };
 }
 
@@ -29,6 +31,7 @@ function mapDispatchToProps(dispatch) {
         actions: bindActionCreators({
             getYourPrsDetails,
             getReviewsDetails,
+            getSidebarContent,
         }, dispatch),
     };
 }

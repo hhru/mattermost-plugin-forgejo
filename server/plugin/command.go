@@ -417,7 +417,7 @@ func (p *Plugin) checkIfConfiguredWebhookExists(ctx context.Context, githubClien
 		}
 
 		for _, hook := range githubHooks {
-			if strings.Contains(hook.Config["url"].(string), siteURL) {
+			if url, ok := hook.Config["url"].(string); ok && strings.Contains(url, siteURL) {
 				found = true
 				break
 			}
