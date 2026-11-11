@@ -33,6 +33,9 @@ const (
 
 	reEncryptMutexKey = "reencrypt_user_data_mutex"
 
+	tokenRefreshMutexKeyPrefix = "token_refresh_mutex_"
+	tokenRefreshLockTimeout    = 15 * time.Second
+
 	wsEventConnect    = "connect"
 	wsEventDisconnect = "disconnect"
 	// WSEventConfigUpdate is the WebSocket event to update the configurations on webapp.
@@ -94,6 +97,13 @@ type Plugin struct {
 	oauthBroker   *OAuthBroker
 
 	emojiMap map[string]string
+
+	// tokenRefreshLocks holds a *sync.Mutex per user ID serializing OAuth
+	// token refreshes on this node (see lockTokenRefresh).
+	tokenRefreshLocks sync.Map
+	// tokenRefreshClusterLocker, when set, replaces the cluster mutex taken
+	// by lockTokenRefresh (tests only).
+	tokenRefreshClusterLocker func(userID string) (func(), error)
 }
 
 // buildForgejoPermalinkRegex compiles the regex used to detect Forgejo file
@@ -206,58 +216,112 @@ func (p *Plugin) forgejoConnect(info *ForgejoUserInfo) *http.Client {
 }
 
 // oauthClient is the single place every user-authenticated Forgejo client is
-// built, so refreshed tokens are persisted uniformly (see persistingTokenSource).
+// built, so refreshed tokens are persisted uniformly (see refreshingTokenSource).
 func (p *Plugin) oauthClient(info *ForgejoUserInfo) (*http.Client, error) {
 	config, err := getOauthConfig(p.getConfiguration())
 	if err != nil {
 		return nil, err
 	}
 	tok := *info.Token
-	src := &persistingTokenSource{
-		base:   config.TokenSource(context.Background(), &tok),
+	src := &refreshingTokenSource{
 		plugin: p,
 		userID: info.UserID,
-		seen:   tok.AccessToken,
+		last:   &tok,
+		refresh: func(refreshToken string) (*oauth2.Token, error) {
+			// A token without an access token is never valid, so the source
+			// always performs a refresh-token grant.
+			return config.TokenSource(context.Background(), &oauth2.Token{RefreshToken: refreshToken}).Token()
+		},
 	}
-	return oauth2.NewClient(context.Background(), src), nil
+	return oauth2.NewClient(context.Background(), oauth2.ReuseTokenSource(&tok, src)), nil
 }
 
-// persistingTokenSource persists rotated tokens back to the KV store.
-// Forgejo rotates refresh tokens: each refresh invalidates the previous grant,
-// so a refreshed pair that isn't stored makes the next refresh fail with
-// "invalid_grant". It writes back only when base.Token() returns a new access
-// token, so a still-valid token costs no write.
-type persistingTokenSource struct {
-	base   oauth2.TokenSource
-	plugin *Plugin
-	userID string
-
-	mu   sync.Mutex
-	seen string // last access token already persisted/observed
+// refreshingTokenSource refreshes an expired access token and persists the
+// rotated pair back to the KV store. It is wrapped in oauth2.ReuseTokenSource,
+// which caches the valid token and serializes calls per client.
+//
+// Forgejo rotates refresh tokens and revokes the whole grant when a refresh
+// token is used twice. Every request builds its own client from the stored
+// token, so concurrent requests with an expired access token would all try to
+// refresh with the same refresh token. To prevent that, refreshes are
+// serialized per user (in-process and cluster-wide), and after acquiring the
+// lock the stored token is re-read: if another request already refreshed it,
+// that token is adopted instead of refreshing again.
+type refreshingTokenSource struct {
+	plugin  *Plugin
+	userID  string
+	refresh func(refreshToken string) (*oauth2.Token, error)
+	last    *oauth2.Token // last plaintext token seen by this client
 }
 
-func (s *persistingTokenSource) Token() (*oauth2.Token, error) {
-	tok, err := s.base.Token()
+func (s *refreshingTokenSource) Token() (*oauth2.Token, error) {
+	unlock, err := s.plugin.lockTokenRefresh(s.userID)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed to acquire token refresh lock")
 	}
+	defer unlock()
 
-	s.mu.Lock()
-	rotated := tok.AccessToken != s.seen
-	if rotated {
-		s.seen = tok.AccessToken
-	}
-	s.mu.Unlock()
-
-	if rotated {
-		if err := s.plugin.persistRefreshedToken(s.userID, tok); err != nil {
-			// Best-effort: this request still proceeds with the fresh token.
-			s.plugin.client.Log.Warn("Failed to persist refreshed Forgejo token",
-				"user_id", s.userID, "error", err.Error())
+	refreshToken := s.last.RefreshToken
+	if stored, apiErr := s.plugin.getGitHubUserInfo(s.userID); apiErr == nil && stored.Token != nil {
+		if stored.Token.AccessToken != s.last.AccessToken && stored.Token.Valid() {
+			// Another request (or node) already refreshed the token.
+			s.last = stored.Token
+			return s.last, nil
+		}
+		if stored.Token.RefreshToken != "" {
+			refreshToken = stored.Token.RefreshToken
 		}
 	}
 
+	tok, err := s.refresh(refreshToken)
+	if err != nil {
+		return nil, err
+	}
+	s.last = tok
+
+	if err := s.plugin.persistRefreshedToken(s.userID, tok); err != nil {
+		// Best-effort: this request still proceeds with the fresh token.
+		s.plugin.client.Log.Warn("Failed to persist refreshed Forgejo token",
+			"user_id", s.userID, "error", err.Error())
+	}
+
 	return tok, nil
+}
+
+// lockTokenRefresh acquires the per-user token refresh lock and returns its
+// unlock function. An in-process mutex goes first so same-node waiters wake as
+// soon as the refresh finishes instead of polling the cluster mutex.
+func (p *Plugin) lockTokenRefresh(userID string) (func(), error) {
+	v, _ := p.tokenRefreshLocks.LoadOrStore(userID, &sync.Mutex{})
+	local := v.(*sync.Mutex)
+	local.Lock()
+
+	clusterLock := p.lockTokenRefreshCluster
+	if p.tokenRefreshClusterLocker != nil {
+		clusterLock = p.tokenRefreshClusterLocker
+	}
+	unlockCluster, err := clusterLock(userID)
+	if err != nil {
+		local.Unlock()
+		return nil, err
+	}
+	return func() {
+		unlockCluster()
+		local.Unlock()
+	}, nil
+}
+
+func (p *Plugin) lockTokenRefreshCluster(userID string) (func(), error) {
+	m, err := cluster.NewMutex(p.API, tokenRefreshMutexKeyPrefix+userID)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), tokenRefreshLockTimeout)
+	defer cancel()
+	if err := m.LockWithContext(ctx); err != nil {
+		return nil, err
+	}
+	return m.Unlock, nil
 }
 
 // persistRefreshedToken stores a freshly refreshed (and still plaintext) token
