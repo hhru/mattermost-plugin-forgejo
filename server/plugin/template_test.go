@@ -1340,7 +1340,7 @@ func TestPullRequestReviewNotification(t *testing.T) {
 >Excited to see git-get-head land!
 `
 
-		actual, err := renderTemplate("pullRequestReviewNotification", &FPullRequestReviewEvent{
+		actual, err := renderTemplate("pullRequestReviewNotification", &pullRequestReviewNotification{FPullRequestReviewEvent: &FPullRequestReviewEvent{
 			Repo:        &fRepo,
 			PullRequest: &fPullRequest,
 			Sender:      &fUser,
@@ -1348,7 +1348,7 @@ func TestPullRequestReviewNotification(t *testing.T) {
 				Type:    sToP("pull_request_review_approved"),
 				Content: sToP("Excited to see git-get-head land!"),
 			},
-		})
+		}})
 		require.NoError(t, err)
 		require.Equal(t, expected, actual)
 	})
@@ -1359,7 +1359,7 @@ func TestPullRequestReviewNotification(t *testing.T) {
 >Excited to see git-get-head land!
 `
 
-		actual, err := renderTemplate("pullRequestReviewNotification", &FPullRequestReviewEvent{
+		actual, err := renderTemplate("pullRequestReviewNotification", &pullRequestReviewNotification{FPullRequestReviewEvent: &FPullRequestReviewEvent{
 			Repo:        &fRepo,
 			PullRequest: &fPullRequest,
 			Sender:      &fUser,
@@ -1367,7 +1367,7 @@ func TestPullRequestReviewNotification(t *testing.T) {
 				Type:    sToP("pull_request_review_rejected"),
 				Content: sToP("Excited to see git-get-head land!"),
 			},
-		})
+		}})
 		require.NoError(t, err)
 		require.Equal(t, expected, actual)
 	})
@@ -1379,7 +1379,7 @@ func TestPullRequestReviewNotification(t *testing.T) {
 >` + usernameMentions + `
 `
 
-		actual, err := renderTemplate("pullRequestReviewNotification", &FPullRequestReviewEvent{
+		actual, err := renderTemplate("pullRequestReviewNotification", &pullRequestReviewNotification{FPullRequestReviewEvent: &FPullRequestReviewEvent{
 			Repo:        &fRepo,
 			PullRequest: &fPullRequest,
 			Sender:      &fUser,
@@ -1387,7 +1387,7 @@ func TestPullRequestReviewNotification(t *testing.T) {
 				Type:    sToP("pull_request_review_approved"),
 				Content: sToP("Excited to see git-get-head land!\n" + gitHubMentions),
 			},
-		})
+		}})
 		require.NoError(t, err)
 		require.Equal(t, expected, actual)
 	}))
@@ -1396,14 +1396,14 @@ func TestPullRequestReviewNotification(t *testing.T) {
 @pandabot approved your pull request [mattermost-plugin-forgejo#42](https://github.com/mattermost/mattermost-plugin-github/pull/42) - Leverage git-get-head
 `
 
-		actual, err := renderTemplate("pullRequestReviewNotification", &FPullRequestReviewEvent{
+		actual, err := renderTemplate("pullRequestReviewNotification", &pullRequestReviewNotification{FPullRequestReviewEvent: &FPullRequestReviewEvent{
 			Repo:        &fRepo,
 			PullRequest: &fPullRequest,
 			Sender:      &fUser,
 			Review: &FPullRequestReview{
 				Type: sToP("pull_request_review_approved"),
 			},
-		})
+		}})
 		require.NoError(t, err)
 		require.Equal(t, expected, actual)
 	}))
@@ -1412,7 +1412,7 @@ func TestPullRequestReviewNotification(t *testing.T) {
 @pandabot approved your pull request [mattermost-plugin-forgejo#42](https://github.com/mattermost/mattermost-plugin-github/pull/42) - Leverage git-get-head
 `
 
-		actual, err := renderTemplate("pullRequestReviewNotification", &FPullRequestReviewEvent{
+		actual, err := renderTemplate("pullRequestReviewNotification", &pullRequestReviewNotification{FPullRequestReviewEvent: &FPullRequestReviewEvent{
 			Repo:        &fRepo,
 			PullRequest: &fPullRequest,
 			Sender:      &fUser,
@@ -1420,10 +1420,58 @@ func TestPullRequestReviewNotification(t *testing.T) {
 				Type:    sToP("pull_request_review_approved"),
 				Content: sToP(""),
 			},
-		})
+		}})
 		require.NoError(t, err)
 		require.Equal(t, expected, actual)
 	}))
+	t.Run("rejected with inline comments", func(t *testing.T) {
+		expected := `
+[panda](https://github.com/panda) requested changes on your pull request [mattermost-plugin-forgejo#42](https://github.com/mattermost/mattermost-plugin-github/pull/42) - Leverage git-get-head
+>Please fix these.
+* [View comment on ` + "`server/plugin/webhook.go`" + `](https://forgejo.example.com/o/r/pulls/42#issuecomment-1)
+* [View comment](https://forgejo.example.com/o/r/pulls/42#issuecomment-2)
+`
+
+		actual, err := renderTemplate("pullRequestReviewNotification", &pullRequestReviewNotification{
+			FPullRequestReviewEvent: &FPullRequestReviewEvent{
+				Repo:        &fRepo,
+				PullRequest: &fPullRequest,
+				Sender:      &fUser,
+				Review: &FPullRequestReview{
+					Type:    sToP("pull_request_review_rejected"),
+					Content: sToP("Please fix these."),
+				},
+			},
+			Comments: []*github.PullRequestComment{
+				{Path: sToP("server/plugin/webhook.go"), HTMLURL: sToP("https://forgejo.example.com/o/r/pulls/42#issuecomment-1")},
+				{HTMLURL: sToP("https://forgejo.example.com/o/r/pulls/42#issuecomment-2")},
+			},
+		})
+		require.NoError(t, err)
+		require.Equal(t, expected, actual)
+	})
+	t.Run("approved with more inline comments than linked", func(t *testing.T) {
+		expected := `
+[panda](https://github.com/panda) approved your pull request [mattermost-plugin-forgejo#42](https://github.com/mattermost/mattermost-plugin-github/pull/42) - Leverage git-get-head
+* [View comment on ` + "`README.md`" + `](https://forgejo.example.com/o/r/pulls/42#issuecomment-1)
+* […and more comments](https://forgejo.example.com/o/r/pulls/42#issuecomment-9)
+`
+
+		actual, err := renderTemplate("pullRequestReviewNotification", &pullRequestReviewNotification{
+			FPullRequestReviewEvent: &FPullRequestReviewEvent{
+				Repo:        &fRepo,
+				PullRequest: &fPullRequest,
+				Sender:      &fUser,
+				Review:      &FPullRequestReview{Type: sToP("pull_request_review_approved")},
+			},
+			Comments: []*github.PullRequestComment{
+				{Path: sToP("README.md"), HTMLURL: sToP("https://forgejo.example.com/o/r/pulls/42#issuecomment-1")},
+			},
+			MoreCommentsURL: "https://forgejo.example.com/o/r/pulls/42#issuecomment-9",
+		})
+		require.NoError(t, err)
+		require.Equal(t, expected, actual)
+	})
 }
 
 func TestReleaseNotification(t *testing.T) {

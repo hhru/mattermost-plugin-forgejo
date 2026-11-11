@@ -445,7 +445,11 @@ Assignees: {{range $i, $el := .Assignees -}} {{- if $i}}, {{end}}{{template "FUs
 {{- else if eq .GetReview.GetType "commented" }} commented on your pull request
 {{- end }} {{template "reviewRepoPullRequestWithTitle" .}}
 {{if ne .GetReview.GetContent ""}}{{.Review.Content | trimBody | trimSpace | quote | replaceAllForgejoUsernames}}
-{{else}}{{end}}`))
+{{else}}{{end}}
+{{- range .Comments}}* [View comment{{with .GetPath}} on ` + "`{{.}}`" + `{{end}}]({{.GetHTMLURL}})
+{{end}}
+{{- with .MoreCommentsURL}}* […and more comments]({{.}})
+{{end}}`))
 
 	template.Must(masterTemplate.New("helpText").Parse("" +
 		"* `/forgejo connect{{if .EnablePrivateRepo}}{{if not .ConnectToPrivateByDefault}} [private]{{end}}{{end}}` - Connect your Mattermost account to your Forgejo account.\n" +

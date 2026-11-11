@@ -18,6 +18,7 @@ import (
 
 	"github.com/google/go-github/v54/github"
 	"github.com/microcosm-cc/bluemonday"
+	"golang.org/x/oauth2"
 
 	"github.com/mattermost/mattermost/server/public/model"
 )
@@ -51,7 +52,19 @@ const (
 	forgejoObjectTypePRReviewComment   = "pr_review_comment"
 	forgejoObjectTypeDiscussionComment = "discussion_comment"
 	forgejoEventHeader                 = "X-Forgejo-Event"
+
+	// reviewCommentsReqTimeout bounds the requests fetching a review's inline comments.
+	reviewCommentsReqTimeout = 5 * time.Second
+	// maxReviewCommentLinks is the maximum number of inline comment links in a review DM.
+	maxReviewCommentLinks = 20
 )
+
+// reviewTypeToState maps the review type of a Forgejo review webhook to the state
+// of the review in the pull request reviews API.
+var reviewTypeToState = map[string]string{
+	"pull_request_review_approved": "APPROVED",
+	"pull_request_review_rejected": "REQUEST_CHANGES",
+}
 
 var eventTypeMapping = map[string]any{
 	"issues":                &FIssuesEvent{},
@@ -1422,7 +1435,12 @@ func (p *Plugin) handlePullRequestReviewNotification(event *FPullRequestReviewEv
 		return
 	}
 
-	message, err := renderTemplate("pullRequestReviewNotification", event)
+	comments, moreCommentsURL := p.getReviewComments(authorUserID, event)
+	message, err := renderTemplate("pullRequestReviewNotification", &pullRequestReviewNotification{
+		FPullRequestReviewEvent: event,
+		Comments:                comments,
+		MoreCommentsURL:         moreCommentsURL,
+	})
 	if err != nil {
 		p.client.Log.Warn("Failed to render template", "error", err.Error())
 		return
@@ -1430,6 +1448,83 @@ func (p *Plugin) handlePullRequestReviewNotification(event *FPullRequestReviewEv
 
 	p.CreateBotDMPost(authorUserID, message, "custom_git_review")
 	p.sendRefreshEvent(authorUserID)
+}
+
+// pullRequestReviewNotification is the data rendered by the pullRequestReviewNotification template.
+type pullRequestReviewNotification struct {
+	*FPullRequestReviewEvent
+
+	// Comments are the inline comments submitted as part of the review. The webhook
+	// payload doesn't include them, so they are fetched separately.
+	Comments []*github.PullRequestComment
+	// MoreCommentsURL links to the review when it has more inline comments than Comments holds.
+	MoreCommentsURL string
+}
+
+// getReviewComments fetches up to maxReviewCommentLinks inline comments of the review in
+// the event, using the Forgejo token of the given user. When the review has more comments,
+// it also returns a link to the review. It returns nil, "" if the comments can't be fetched.
+//
+// The Forgejo review webhook carries no review ID, so the review is looked up as the
+// latest one by the sender with the state matching the webhook's review type.
+func (p *Plugin) getReviewComments(userID string, event *FPullRequestReviewEvent) ([]*github.PullRequestComment, string) {
+	if event.Repo.Name == nil || event.PullRequest.Number == nil {
+		return nil, ""
+	}
+	owner, repo, number := event.Repo.Owner.GetLogin(), *event.Repo.Name, *event.PullRequest.Number
+
+	info, apiErr := p.getGitHubUserInfo(userID)
+	if apiErr != nil {
+		return nil, ""
+	}
+
+	githubClient := p.githubConnectUser(context.Background(), info)
+	if githubClient == nil {
+		return nil, ""
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), reviewCommentsReqTimeout)
+	defer cancel()
+
+	var comments []*github.PullRequestComment
+	var reviewURL string
+	err := p.useGitHubClient(info, func(_ *ForgejoUserInfo, _ *oauth2.Token) error {
+		// Forgejo ignores the page size here and returns all reviews in one page.
+		reviews, _, err := githubClient.PullRequests.ListReviews(ctx, owner, repo, number, nil)
+		if err != nil {
+			return err
+		}
+		review := findSubmittedReview(reviews, event.GetSender().GetLogin(), reviewTypeToState[event.GetReview().GetType()])
+		if review == nil {
+			return nil
+		}
+		reviewURL = review.GetHTMLURL()
+		// Forgejo returns all comments of a review in one page.
+		comments, _, err = githubClient.PullRequests.ListReviewComments(ctx, owner, repo, number, review.GetID(), nil)
+		return err
+	})
+	if err != nil {
+		return nil, ""
+	}
+
+	if len(comments) > maxReviewCommentLinks {
+		return comments[:maxReviewCommentLinks], reviewURL
+	}
+	return comments, ""
+}
+
+// findSubmittedReview returns the latest review by login in the given state.
+func findSubmittedReview(reviews []*github.PullRequestReview, login, state string) *github.PullRequestReview {
+	var latest *github.PullRequestReview
+	for _, r := range reviews {
+		if r.GetUser().GetLogin() != login || r.GetState() != state {
+			continue
+		}
+		if latest == nil || r.GetID() > latest.GetID() {
+			latest = r
+		}
+	}
+	return latest
 }
 
 func (p *Plugin) postStarEvent(event *github.StarEvent) {
