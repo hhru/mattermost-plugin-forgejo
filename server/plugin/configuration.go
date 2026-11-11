@@ -41,10 +41,16 @@ type Configuration struct {
 	EnableWebhookEventLogging      bool   `json:"enablewebhookeventlogging"`
 	ShowAuthorInCommitNotification bool   `json:"showauthorincommitnotification"`
 	GetNotificationForDraftPRs     bool   `json:"getnotificationfordraftprs"`
-	// ReviewTargetDays is the number of calendar days from PR open until a review is "due" (0 = SLA disabled).
+	// ReviewTargetDays is the number of days from the review-request start until a review is "due" (0 = SLA disabled).
+	// Day counting follows ReviewTargetDayType.
 	ReviewTargetDays int `json:"reviewtargetdays"`
+	// ReviewTargetDayType is "calendar" (default) or "business" (Mon–Fri) for computing the due date.
+	ReviewTargetDayType string `json:"reviewtargetdaytype"`
 	// OverdueReviewsChannelID is an optional channel ID for daily alerts when users have overdue review requests.
 	OverdueReviewsChannelID string `json:"overduereviewschannelid"`
+	// DigestServiceUsername is the Mattermost username whose GitHub connection runs the overdue review digest.
+	// When empty, the plugin falls back to the lexicographically-first connected user.
+	DigestServiceUsername string `json:"digestserviceusername"`
 }
 
 func (c *Configuration) ToMap() (map[string]any, error) {
@@ -103,9 +109,11 @@ func (c *Configuration) sanitize() {
 	c.BaseURL = strings.TrimRight(c.BaseURL, "/")
 	c.UploadURL = strings.TrimRight(c.UploadURL, "/")
 	c.OverdueReviewsChannelID = strings.TrimSpace(c.OverdueReviewsChannelID)
+	c.DigestServiceUsername = strings.TrimSpace(c.DigestServiceUsername)
 	if c.ReviewTargetDays < 0 {
 		c.ReviewTargetDays = 0
 	}
+	c.ReviewTargetDayType = normalizeSLADayType(c.ReviewTargetDayType)
 
 	// Trim spaces around org and OAuth credentials
 	c.ForgejoOrg = strings.TrimSpace(c.ForgejoOrg)
@@ -124,9 +132,14 @@ func (c *Configuration) IsSASS() bool {
 
 func (c *Configuration) ClientConfiguration() map[string]any {
 	return map[string]any{
-		"left_sidebar_enabled": c.EnableLeftSidebar,
-		"review_target_days":   c.ReviewTargetDays,
+		"left_sidebar_enabled":   c.EnableLeftSidebar,
+		"review_target_days":     c.ReviewTargetDays,
+		"review_target_day_type": c.reviewTargetDayType(),
 	}
+}
+
+func (c *Configuration) reviewTargetDayType() string {
+	return normalizeSLADayType(c.ReviewTargetDayType)
 }
 
 // Clone shallow copies the configuration. Your implementation may require a deep copy if

@@ -5,7 +5,7 @@
     "homepage_url": "https://github.com/mattermost/mattermost-plugin-github",
     "support_url": "https://github.com/mattermost/mattermost-plugin-github/issues",
     "icon_path": "assets/icon.svg",
-    "min_server_version": "10.7.0",
+    "min_server_version": "12.0.0",
     "server": {
       "executables": {
           "linux-amd64": "server/dist/plugin-linux-amd64",
@@ -132,13 +132,36 @@
                 "display_name": "PR review target (days):",
                 "type": "number",
                 "default": "0",
-                "help_text": "Optional. Number of calendar days until a review counts as due. The start time is when you were requested as a reviewer (recorded from GitHub pull_request review_requested webhooks to this server); if unknown, the PR open date is used. When greater than zero, /github todo shows due/overdue text and the sidebar review counter can be color-coded. Set to 0 to disable."
+                "help_text": "Optional. Number of days until a review counts as due (see PR review target day type). The start time is when you were requested as a reviewer (recorded from GitHub pull_request review_requested webhooks to this server); if unknown, the PR open date is used. When greater than zero, /github todo shows due/overdue text and the sidebar review counter can be color-coded. Set to 0 to disable."
+            },
+            {
+                "key": "ReviewTargetDayType",
+                "display_name": "PR review target day type:",
+                "type": "dropdown",
+                "default": "calendar",
+                "help_text": "How PR review target (days) is counted when computing the due date. Calendar days count every day including weekends. Business days count Monday–Friday only (e.g. Friday + 2 business days = Tuesday). Overdue age shown in /github todo, sidebar badges, and digest buckets remains in calendar days either way.",
+                "options": [
+                    {
+                        "display_name": "Calendar days",
+                        "value": "calendar"
+                    },
+                    {
+                        "display_name": "Business days (Mon–Fri)",
+                        "value": "business"
+                    }
+                ]
             },
             {
                 "key": "OverdueReviewsChannelID",
                 "display_name": "Post overdue review alerts to channel (ID):",
                 "type": "text",
-                "help_text": "Optional. Paste a channel ID (Channel menu > View Info). When set together with PR review target (days), the plugin posts one aggregated overdue-review digest to this channel each day shortly after midnight in the server local timezone (the GitHub bot must be a member of the channel)."
+                "help_text": "Optional. Paste a channel ID (Channel menu > View Info). When set together with PR review target (days) and GitHub Organizations, the plugin posts one aggregated overdue-review digest for those orgs to this channel each day shortly after midnight in the server local timezone. Requires digest service user (below) to be connected via /github connect. The GitHub bot must be a member of the channel."
+            },
+            {
+                "key": "DigestServiceUsername",
+                "display_name": "Digest service user (Mattermost username):",
+                "type": "text",
+                "help_text": "Optional. Mattermost @username whose GitHub connection runs the overdue review digest (org-wide GraphQL and team lookups). Use a stable account that will stay connected to GitHub, e.g. a team lead or bot user. When empty, the plugin uses the lexicographically-first connected user, which can be hard to predict."
             }
         ],
         "footer": "* To report an issue, make a suggestion or a contribution, [check the repository](https://github.com/mattermost/mattermost-plugin-github)."

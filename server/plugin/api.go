@@ -1046,19 +1046,34 @@ func (p *Plugin) getPrsDetails(c *UserContext, w http.ResponseWriter, r *http.Re
 
 	prDetails := make([]*PRDetails, len(validPRs))
 	var wg sync.WaitGroup
+	var fetchErr error
+	var fetchErrMu sync.Mutex
+	recordFetchErr := func(err error) {
+		fetchErrMu.Lock()
+		defer fetchErrMu.Unlock()
+		fetchErr = preferAuthErr(fetchErr, err)
+	}
 	for i, pr := range validPRs {
 		wg.Go(func() {
-			prDetail := p.fetchPRDetails(c, githubClient, pr.URL, pr.Number)
+			prDetail, err := p.fetchPRDetails(c, githubClient, pr.URL, pr.Number)
 			prDetails[i] = prDetail
+			if err != nil {
+				recordFetchErr(err)
+			}
 		})
 	}
 
 	wg.Wait()
 
+	if isGitHubAuthFailure(fetchErr) {
+		p.handleAuthFailure(c.GHInfo, fetchErr)
+		p.writeAPIError(w, &APIErrorResponse{ID: "", Message: "Not authorized.", StatusCode: http.StatusUnauthorized})
+		return
+	}
 	p.writeJSON(w, prDetails)
 }
 
-func (p *Plugin) fetchPRDetails(c *UserContext, client *github.Client, prURL string, prNumber int) *PRDetails {
+func (p *Plugin) fetchPRDetails(c *UserContext, client *github.Client, prURL string, prNumber int) (*PRDetails, error) {
 	var status string
 	var mergeable bool
 	// Initialize to a non-nil slice to simplify JSON handling semantics
@@ -1073,16 +1088,24 @@ func (p *Plugin) fetchPRDetails(c *UserContext, client *github.Client, prURL str
 			Number:             prNumber,
 			RequestedReviewers: requestedReviewers,
 			Reviews:            []string{},
-		}
+		}, nil
 	}
 
 	var wg sync.WaitGroup
+	var fetchErr error
+	var fetchErrMu sync.Mutex
+	recordFetchErr := func(err error, msg string) {
+		c.Log.WithError(err).Warnf("%s", msg)
+		fetchErrMu.Lock()
+		defer fetchErrMu.Unlock()
+		fetchErr = preferAuthErr(fetchErr, err)
+	}
 
 	// Fetch reviewers and status
 	wg.Go(func() {
 		prInfo, _, err := client.PullRequests.Get(c.Ctx, repoOwner, repoName, prNumber)
 		if err != nil {
-			c.Log.WithError(err).Warnf("Failed to fetch PR for PR details")
+			recordFetchErr(err, "Failed to fetch PR for PR details")
 			return
 		}
 
@@ -1093,7 +1116,7 @@ func (p *Plugin) fetchPRDetails(c *UserContext, client *github.Client, prURL str
 		}
 		statuses, _, err := client.Repositories.GetCombinedStatus(c.Ctx, repoOwner, repoName, prInfo.GetHead().GetSHA(), nil)
 		if err != nil {
-			c.Log.WithError(err).Warnf("Failed to fetch combined status")
+			recordFetchErr(err, "Failed to fetch combined status")
 			return
 		}
 		if *statuses.State == "" {
@@ -1111,7 +1134,7 @@ func (p *Plugin) fetchPRDetails(c *UserContext, client *github.Client, prURL str
 		Mergeable:          mergeable,
 		RequestedReviewers: requestedReviewers,
 		Reviews:            []string{},
-	}
+	}, fetchErr
 }
 
 func getRepoOwnerAndNameFromURL(rawURL string) (string, string, error) {
@@ -1395,24 +1418,24 @@ func newGithubIssue(issue FIssue, labels []*github.Label, baseURL string) *githu
 
 func (p *Plugin) getSidebarData(c *UserContext) (*SidebarContent, error) {
 	reviewResp, assignmentResp, openPRResp, err := p.getLHSData(c)
-	if err != nil {
-		return nil, err
-	}
 
 	return &SidebarContent{
 		PRs:         openPRResp,
 		Assignments: assignmentResp,
 		Reviews:     reviewResp,
 		Unreads:     p.getUnreadsData(c),
-	}, nil
+	}, err
 }
 
 func (p *Plugin) getSidebarContent(c *UserContext, w http.ResponseWriter, r *http.Request) {
 	sidebarContent, err := p.getSidebarData(c)
-	if err != nil {
+	if err != nil && !isGitHubAuthFailure(err) {
 		c.Log.WithError(err).Errorf("Failed to search for the sidebar data")
 		p.writeAPIError(w, &APIErrorResponse{Message: "failed to search for the sidebar data", StatusCode: http.StatusInternalServerError})
 		return
+	}
+	if err != nil {
+		c.Log.WithError(err).Warnf("Returning partial sidebar data after GitHub auth failure")
 	}
 
 	p.writeJSON(w, sidebarContent)

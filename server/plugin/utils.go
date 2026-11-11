@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/mattermost/mattermost/server/public/pluginapi"
 
@@ -383,4 +384,37 @@ func lastN(s string, n int) string {
 	}
 
 	return string(out)
+}
+
+const (
+	slaDayTypeCalendar = "calendar"
+	slaDayTypeBusiness = "business"
+)
+
+func normalizeSLADayType(dayType string) string {
+	if strings.EqualFold(strings.TrimSpace(dayType), slaDayTypeBusiness) {
+		return slaDayTypeBusiness
+	}
+	return slaDayTypeCalendar
+}
+
+// truncateMessageAtRunes shortens message to at most maxRunes runes, appending marker when clipped.
+// Truncation is rune-aware so multibyte UTF-8 sequences are not split.
+func truncateMessageAtRunes(message string, maxRunes int, marker string) string {
+	if maxRunes <= 0 {
+		return ""
+	}
+	if utf8.RuneCountInString(message) <= maxRunes {
+		return message
+	}
+	markerRunes := utf8.RuneCountInString(marker)
+	keep := maxRunes - markerRunes
+	if keep <= 0 {
+		runes := []rune(marker)
+		if len(runes) > maxRunes {
+			return string(runes[:maxRunes])
+		}
+		return marker
+	}
+	return string([]rune(message)[:keep]) + marker
 }

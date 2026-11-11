@@ -7,6 +7,7 @@ import {createSelector} from 'reselect';
 
 import {GlobalState, PluginState} from './types/store';
 import {ForgejoIssueData, SidebarData, PrsDetailsData, UnreadsData} from './types/forgejo_types';
+import {normalizeReviewTargetDayType} from './utils/sla';
 
 const emptyArray: ForgejoIssueData[] | UnreadsData[] = [];
 
@@ -64,6 +65,7 @@ export const getSidebarData = createSelector(
             orgs: organizations,
             rhsState,
             reviewTargetDays: pluginConfig.review_target_days || 0,
+            reviewTargetDayType: normalizeReviewTargetDayType(pluginConfig.review_target_day_type as string | undefined),
         };
     },
 );

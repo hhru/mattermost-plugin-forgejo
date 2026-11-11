@@ -3,7 +3,7 @@
   "scripts": {
     "build": "webpack --mode=production",
     "build:watch": "webpack --mode=production --watch",
-    "debug": "webpack --mode=none",
+    "debug": "webpack --mode=development",
     "debug:watch": "webpack --mode=development --watch",
     "lint": "eslint --ignore-pattern node_modules --ignore-pattern dist --ext .js --ext .jsx --ext tsx --ext ts . --quiet --cache",
     "fix": "eslint --ignore-pattern node_modules --ignore-pattern dist --ext .js --ext .jsx --ext tsx --ext ts . --quiet --fix --cache",
@@ -14,7 +14,7 @@
   },
   "devDependencies": {
     "@babel/cli": "7.20.7",
-    "@babel/core": "7.26.0",
+    "@babel/core": "7.29.6",
     "@babel/eslint-parser": "7.25.9",
     "@babel/plugin-syntax-dynamic-import": "7.8.3",
     "@babel/plugin-transform-class-properties": "7.25.9",

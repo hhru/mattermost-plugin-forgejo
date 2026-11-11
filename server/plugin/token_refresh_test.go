@@ -2,7 +2,12 @@ package plugin
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"slices"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/mattermost/mattermost/server/public/plugin/plugintest"
 	"github.com/mattermost/mattermost/server/public/pluginapi"
@@ -23,22 +28,6 @@ func (c *countingStore) SetAtomicWithRetries(key string, fn func(oldValue []byte
 	return c.KvStore.SetAtomicWithRetries(key, fn)
 }
 
-// fakeTokenSource returns the tokens in sequence, repeating the last one once
-// the sequence is exhausted (mimicking ReuseTokenSource handing back a cached
-// token on subsequent calls).
-type fakeTokenSource struct {
-	tokens []*oauth2.Token
-	i      int
-}
-
-func (f *fakeTokenSource) Token() (*oauth2.Token, error) {
-	tok := f.tokens[f.i]
-	if f.i < len(f.tokens)-1 {
-		f.i++
-	}
-	return tok, nil
-}
-
 func newTokenTestPlugin(t *testing.T, store KvStore) *Plugin {
 	t.Helper()
 	p := NewPlugin()
@@ -55,6 +44,8 @@ func newTokenTestPlugin(t *testing.T, store KvStore) *Plugin {
 	p.SetAPI(api)
 	p.client = pluginapi.NewClient(api, p.Driver)
 	p.store = store
+	// The in-process gate in lockTokenRefresh is real; skip the cluster mutex.
+	p.tokenRefreshClusterLocker = func(string) (func(), error) { return func() {}, nil }
 
 	return p
 }
@@ -127,27 +118,66 @@ func TestPersistRefreshedToken_NoUser(t *testing.T) {
 	require.Error(t, err, "persisting for an unknown user must fail rather than create a partial record")
 }
 
-// TestPersistingTokenSource_RotationPersists verifies that when the underlying
-// source rotates the token, the new pair is persisted to the store and is
-// readable back through getGitHubUserInfo.
-func TestPersistingTokenSource_RotationPersists(t *testing.T) {
+// countingRefresher hands out a new token per refresh and records the refresh
+// tokens it was called with, mimicking Forgejo's refresh-token rotation.
+type countingRefresher struct {
+	mu    sync.Mutex
+	used  []string
+	delay time.Duration
+}
+
+func (c *countingRefresher) refresh(refreshToken string) (*oauth2.Token, error) {
+	time.Sleep(c.delay)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if slices.Contains(c.used, refreshToken) {
+		return nil, errors.New("token was already used")
+	}
+	c.used = append(c.used, refreshToken)
+	n := len(c.used) + 1
+	return &oauth2.Token{
+		AccessToken:  fmt.Sprintf("a%d", n),
+		RefreshToken: fmt.Sprintf("r%d", n),
+		TokenType:    "Bearer",
+		Expiry:       time.Now().Add(time.Hour),
+	}, nil
+}
+
+// newTestTokenSource mirrors oauthClient's token source wiring.
+func newTestTokenSource(p *Plugin, userID string, tok *oauth2.Token, r *countingRefresher) oauth2.TokenSource {
+	return oauth2.ReuseTokenSource(tok, &refreshingTokenSource{plugin: p, userID: userID, last: tok, refresh: r.refresh})
+}
+
+func expiredToken(access, refresh string) *oauth2.Token {
+	return &oauth2.Token{AccessToken: access, RefreshToken: refresh, TokenType: "Bearer", Expiry: time.Now().Add(-time.Minute)}
+}
+
+// newCountingTokenTestPlugin returns a plugin with user u1 (a1/r1) stored and
+// the write counter reset.
+func newCountingTokenTestPlugin(t *testing.T) (*Plugin, *countingStore) {
+	t.Helper()
 	store := &countingStore{KvStore: &pluginapi.MemoryStore{}}
 	p := newTokenTestPlugin(t, store)
 	storeInitialUser(t, p, "u1", "a1", "r1")
+	store.atomicWrites = 0
+	return p, store
+}
 
-	src := &persistingTokenSource{
-		base: &fakeTokenSource{tokens: []*oauth2.Token{
-			{AccessToken: "a2", RefreshToken: "r2", TokenType: "Bearer"},
-		}},
-		plugin: p,
-		userID: "u1",
-		seen:   "a1",
+// TestTokenSource_RefreshPersistsOnce verifies that an expired token is
+// refreshed once, persisted once, and readable via getGitHubUserInfo, while
+// subsequent calls reuse the fresh token.
+func TestTokenSource_RefreshPersistsOnce(t *testing.T) {
+	p, store := newCountingTokenTestPlugin(t)
+	r := &countingRefresher{}
+	src := newTestTokenSource(p, "u1", expiredToken("a1", "r1"), r)
+
+	for range 3 {
+		tok, err := src.Token()
+		require.NoError(t, err)
+		require.Equal(t, "a2", tok.AccessToken)
 	}
-
-	tok, err := src.Token()
-	require.NoError(t, err)
-	require.Equal(t, "a2", tok.AccessToken)
-	require.Equal(t, 1, store.atomicWrites, "rotation should trigger exactly one write")
+	require.Equal(t, []string{"r1"}, r.used)
+	require.Equal(t, 1, store.atomicWrites, "the rotated token should be persisted only once")
 
 	info, apiErr := p.getGitHubUserInfo("u1")
 	require.Nil(t, apiErr)
@@ -155,52 +185,66 @@ func TestPersistingTokenSource_RotationPersists(t *testing.T) {
 	require.Equal(t, "r2", info.Token.RefreshToken)
 }
 
-// TestPersistingTokenSource_ValidTokenNoWrite is the regression guard for the
-// concern that the fix might disturb users whose access token has not expired:
-// when base.Token() returns the same (still-valid) token, nothing is written.
-func TestPersistingTokenSource_ValidTokenNoWrite(t *testing.T) {
-	store := &countingStore{KvStore: &pluginapi.MemoryStore{}}
-	p := newTokenTestPlugin(t, store)
-	storeInitialUser(t, p, "u1", "a1", "r1")
+// TestTokenSource_ValidTokenNoWrite guards that a still-valid token neither
+// refreshes nor writes.
+func TestTokenSource_ValidTokenNoWrite(t *testing.T) {
+	p, store := newCountingTokenTestPlugin(t)
+	r := &countingRefresher{}
+	src := newTestTokenSource(p, "u1", &oauth2.Token{AccessToken: "a1", RefreshToken: "r1", Expiry: time.Now().Add(time.Hour)}, r)
 
-	src := &persistingTokenSource{
-		base: &fakeTokenSource{tokens: []*oauth2.Token{
-			{AccessToken: "a1", RefreshToken: "r1", TokenType: "Bearer"},
-		}},
-		plugin: p,
-		userID: "u1",
-		seen:   "a1",
-	}
-
-	// Multiple calls with an unchanged token must never write.
 	for range 3 {
 		tok, err := src.Token()
 		require.NoError(t, err)
 		require.Equal(t, "a1", tok.AccessToken)
 	}
+	require.Empty(t, r.used)
 	require.Equal(t, 0, store.atomicWrites, "a still-valid token must not be written back")
 }
 
-// TestPersistingTokenSource_RotatesOncePerNewToken ensures the write happens
-// only on the transition to a new token, not on every subsequent request that
-// reuses it.
-func TestPersistingTokenSource_RotatesOncePerNewToken(t *testing.T) {
-	store := &countingStore{KvStore: &pluginapi.MemoryStore{}}
-	p := newTokenTestPlugin(t, store)
-	storeInitialUser(t, p, "u1", "a1", "r1")
+// TestTokenSource_AdoptsStoredToken verifies that when another request already
+// refreshed and stored the token, it is reused instead of refreshing again
+// with the (now revoked) old refresh token.
+func TestTokenSource_AdoptsStoredToken(t *testing.T) {
+	p, _ := newCountingTokenTestPlugin(t)
+	require.NoError(t, p.persistRefreshedToken("u1", &oauth2.Token{
+		AccessToken: "a2", RefreshToken: "r2", TokenType: "Bearer", Expiry: time.Now().Add(time.Hour),
+	}))
 
-	src := &persistingTokenSource{
-		base: &fakeTokenSource{tokens: []*oauth2.Token{
-			{AccessToken: "a2", RefreshToken: "r2", TokenType: "Bearer"},
-		}},
-		plugin: p,
-		userID: "u1",
-		seen:   "a1",
-	}
+	r := &countingRefresher{}
+	src := newTestTokenSource(p, "u1", expiredToken("a1", "r1"), r)
 
-	for range 3 {
-		_, err := src.Token()
-		require.NoError(t, err)
+	tok, err := src.Token()
+	require.NoError(t, err)
+	require.Equal(t, "a2", tok.AccessToken)
+	require.Empty(t, r.used, "must not refresh when the stored token is already fresh")
+}
+
+// TestTokenSource_ConcurrentRefresh is the regression test for Forgejo
+// revoking the grant when the same refresh token is used twice: concurrent
+// clients of one user with an expired token must refresh only once.
+func TestTokenSource_ConcurrentRefresh(t *testing.T) {
+	p, _ := newCountingTokenTestPlugin(t)
+	r := &countingRefresher{delay: 20 * time.Millisecond}
+
+	const clients = 8
+	var wg sync.WaitGroup
+	errs := make([]error, clients)
+	toks := make([]string, clients)
+	for i := range clients {
+		src := newTestTokenSource(p, "u1", expiredToken("a1", "r1"), r)
+		wg.Go(func() {
+			tok, err := src.Token()
+			errs[i] = err
+			if tok != nil {
+				toks[i] = tok.AccessToken
+			}
+		})
 	}
-	require.Equal(t, 1, store.atomicWrites, "the rotated token should be persisted only once")
+	wg.Wait()
+
+	for i := range clients {
+		require.NoError(t, errs[i])
+		require.Equal(t, "a2", toks[i])
+	}
+	require.Equal(t, []string{"r1"}, r.used, "refresh token must be used exactly once")
 }

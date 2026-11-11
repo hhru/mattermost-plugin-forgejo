@@ -11,7 +11,7 @@ See the [Mattermost Product Documentation](https://docs.mattermost.com/integrate
 
 ## Development
 
-This plugin contains both a server and web app portion. Read our documentation about the [Developer Workflow](https://developers.mattermost.com/integrate/plugins/developer-workflow/) and [Developer Setup](https://developers.mattermost.com/integrate/plugins/developer-setup/) for more information about developing and extending plugins.
+This plugin contains both a server and web app portions. Read our documentation about the [Developer Workflow](https://developers.mattermost.com/integrate/plugins/developer-workflow/) and [Developer Setup](https://developers.mattermost.com/integrate/plugins/developer-setup/) for more information about developing and extending plugins.
 
 ### Releasing new versions
 
@@ -20,7 +20,7 @@ The version of a plugin is determined at compile time, automatically populating 
 * Otherwise, the version will combine the nearest tag with `git rev-parse --short HEAD`, e.g. `1.3.1+d06e53e1`.
 * If there is no version tag, an empty version will be combined with the short hash, e.g. `0.0.0+76081421`.
 
-To disable this behaviour, manually populate and maintain the `version` field.
+To disable this behavior, manually populate and maintain the `version` field.
 
 ## How to Release
 
@@ -65,3 +65,7 @@ To trigger a release, follow these steps:
 ### Playwright e2e tests
 
 In order to get your environment set up to run [Playwright](https://playwright.dev) tests, please see the setup guide at [e2e/playwright](/e2e/playwright#readme).
+
+### React 19 compatibility
+
+This plugin requires Mattermost 12.0 or later with the MM-70687 host JSX runtime exports. Webpack externalizes React, ReactDOM (including `react-dom/client`), and both JSX runtimes to the host globals. These mappings also cover runtime imports from dependencies. Rebuild the plugin after changing its configuration.
