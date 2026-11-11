@@ -385,51 +385,80 @@ func (p *Plugin) createPost(channelID, userID, message string) error {
 	return nil
 }
 
-func (p *Plugin) checkIfConfiguredWebhookExists(ctx context.Context, githubClient *github.Client, repo, owner string) (bool, int, error) {
-	const undefinedResponseStatusCode = -1
-	found := false
-	opt := &github.ListOptions{
-		PerPage: PerPageValue,
-	}
+// checkIfConfiguredWebhookExists reports whether a webhook pointing at this Mattermost
+// server exists for the repository or, if repo is empty, the organization. A repository
+// without its own webhook is also covered by a webhook of its organization.
+func (p *Plugin) checkIfConfiguredWebhookExists(ctx context.Context, githubClient *github.Client, repo, owner string) (bool, error) {
 	siteURL, err := getSiteURL(p.client)
 	if err != nil {
-		return false, undefinedResponseStatusCode, err
+		return false, err
 	}
 
+	found, err := p.anyHookMatchesSiteURL(ctx, githubClient, owner, repo, siteURL)
+	if repo == "" || found || err != nil {
+		return found, err
+	}
+
+	found, err = p.anyHookMatchesSiteURL(ctx, githubClient, owner, "", siteURL)
+	switch errorStatusCode(err) {
+	case http.StatusNotFound:
+		// The owner is a user, not an organization.
+		return false, nil
+	case http.StatusForbidden:
+		// Only org admins can list org webhooks. The repository may well be covered by
+		// one, so don't warn about a missing webhook.
+		return true, nil
+	}
+	return found, err
+}
+
+// anyHookMatchesSiteURL lists the webhooks of the repository or, if repo is empty, the
+// organization, and reports whether one points at siteURL.
+func (p *Plugin) anyHookMatchesSiteURL(ctx context.Context, githubClient *github.Client, owner, repo, siteURL string) (bool, error) {
+	opt := &github.ListOptions{PerPage: PerPageValue}
 	for {
-		var githubHooks []*github.Hook
-		var githubResponse *github.Response
+		var hooks []*github.Hook
+		var resp *github.Response
 		var err error
-
 		if repo == "" {
-			githubHooks, githubResponse, err = githubClient.Organizations.ListHooks(ctx, owner, opt)
+			hooks, resp, err = githubClient.Organizations.ListHooks(ctx, owner, opt)
 		} else {
-			githubHooks, githubResponse, err = githubClient.Repositories.ListHooks(ctx, owner, repo, opt)
+			hooks, resp, err = githubClient.Repositories.ListHooks(ctx, owner, repo, opt)
 		}
-
 		if err != nil {
-			p.client.Log.Warn("Not able to get the list of webhooks", "Owner", owner, "Repo", repo, "error", err.Error())
-			var errResponse *github.ErrorResponse
-			if errors.As(err, &errResponse) && errResponse.Response != nil {
-				return found, errResponse.Response.StatusCode, err
+			if !isWebhookListAccessError(err) {
+				p.client.Log.Warn("Not able to get the list of webhooks", "Owner", owner, "Repo", repo, "error", err.Error())
 			}
-			return found, undefinedResponseStatusCode, err
+			return false, err
 		}
 
-		for _, hook := range githubHooks {
+		for _, hook := range hooks {
 			if url, ok := hook.Config["url"].(string); ok && strings.Contains(url, siteURL) {
-				found = true
-				break
+				return true, nil
 			}
 		}
 
-		if githubResponse.NextPage == 0 {
-			break
+		if resp.NextPage == 0 {
+			return false, nil
 		}
-		opt.Page = githubResponse.NextPage
+		opt.Page = resp.NextPage
 	}
+}
 
-	return found, http.StatusOK, nil
+// errorStatusCode returns the HTTP status code of a failed go-github request, or 0.
+func errorStatusCode(err error) int {
+	var errResponse *github.ErrorResponse
+	if errors.As(err, &errResponse) && errResponse.Response != nil {
+		return errResponse.Response.StatusCode
+	}
+	return 0
+}
+
+// isWebhookListAccessError reports whether listing webhooks failed because the user
+// may not see them.
+func isWebhookListAccessError(err error) bool {
+	code := errorStatusCode(err)
+	return code == http.StatusNotFound || code == http.StatusForbidden
 }
 
 func (p *Plugin) handleSubscribesAdd(_ *plugin.Context, args *model.CommandArgs, parameters []string, userInfo *ForgejoUserInfo) string {
@@ -522,9 +551,9 @@ func (p *Plugin) handleSubscribesAdd(_ *plugin.Context, args *model.CommandArgs,
 
 		subOrgMsg := fmt.Sprintf("Successfully subscribed to organization %s.", owner)
 
-		found, responseCode, foundErr := p.checkIfConfiguredWebhookExists(ctx, githubClient, repo, owner)
+		found, foundErr := p.checkIfConfiguredWebhookExists(ctx, githubClient, repo, owner)
 		if foundErr != nil {
-			if responseCode == http.StatusNotFound || responseCode == http.StatusForbidden {
+			if isWebhookListAccessError(foundErr) {
 				// We are not returning an error here and just a subscription success message, as the above error condition occurs when the user is not authorized to access webhooks.
 				return ""
 			}
@@ -562,9 +591,9 @@ func (p *Plugin) handleSubscribesAdd(_ *plugin.Context, args *model.CommandArgs,
 		return fmt.Sprintf("%s\nError creating the public post: %s", msg, err.Error())
 	}
 
-	found, responseCode, err := p.checkIfConfiguredWebhookExists(ctx, githubClient, repo, owner)
+	found, err := p.checkIfConfiguredWebhookExists(ctx, githubClient, repo, owner)
 	if err != nil {
-		if responseCode == http.StatusNotFound || responseCode == http.StatusForbidden {
+		if isWebhookListAccessError(err) {
 			// We are not returning an error here and just a subscription success message, as the above error condition occurs when the user is not authorized to access webhooks.
 			return ""
 		}
